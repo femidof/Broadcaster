@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+src-tauri/target/
+sidecar/dist/
+
+# Sidecar compiled binaries (built per-platform)
+src-tauri/binaries/
+
+# Temp files
+.ffmpeg-tmp/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Tauri signing keys
+*.key

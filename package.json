@@ -1,0 +1,47 @@
+{
+  "name": "broadcaster",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "sidecar:build": "cd sidecar && npm run build",
+    "sidecar:dev": "cd sidecar && npm run build:ts",
+    "ffmpeg:download": "node scripts/download-ffmpeg.mjs",
+    "ensure:binaries": "node scripts/ensure-binaries.mjs",
+    "build:release": "node scripts/ensure-binaries.mjs && npm run tauri build",
+    "setup": "npm install && cd sidecar && npm install && cd .. && npm run ffmpeg:download && npm run sidecar:build"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.2.0",
+    "@tauri-apps/plugin-shell": "^2.3.5",
+    "@tauri-apps/plugin-updater": "^2.10.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.575.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/cli": "^2.10.0",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.24",
+    "globals": "^16.5.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.48.0",
+    "vite": "^7.3.1"
+  }
+}
