@@ -29,6 +29,14 @@ export async function removeDestination(id: string): Promise<void> {
   return invoke("remove_destination", { id });
 }
 
+export async function pushDestinations(): Promise<void> {
+  return invoke("push_destinations");
+}
+
+export async function stopPushing(): Promise<void> {
+  return invoke("stop_pushing");
+}
+
 export async function startServer(port: number): Promise<void> {
   return invoke("start_server", { port });
 }

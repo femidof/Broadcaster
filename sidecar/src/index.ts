@@ -8,20 +8,17 @@ function emit(event: OutboundEvent): void {
   process.stdout.write(JSON.stringify(event) + "\n");
 }
 
-function parseArgs(): { ffmpegPath: string; dataDir: string } {
+function parseArgs(): { dataDir: string } {
   const args = process.argv.slice(2);
-  let ffmpegPath = "ffmpeg";
   let dataDir = "./data";
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--ffmpeg-path" && args[i + 1]) {
-      ffmpegPath = args[++i];
-    } else if (args[i] === "--data-dir" && args[i + 1]) {
+    if (args[i] === "--data-dir" && args[i + 1]) {
       dataDir = args[++i];
     }
   }
 
-  return { ffmpegPath, dataDir };
+  return { dataDir };
 }
 
 function emitDebugLog(source: string, message: string): void {
@@ -29,7 +26,7 @@ function emitDebugLog(source: string, message: string): void {
 }
 
 function main(): void {
-  const { ffmpegPath, dataDir } = parseArgs();
+  const { dataDir } = parseArgs();
   const config = new ConfigStore(dataDir);
 
   process.on("uncaughtException", (err) => {
@@ -46,7 +43,7 @@ function main(): void {
   let relayManager: RelayManager | null = null;
 
   function initRelayManager(): RelayManager {
-    const rm = new RelayManager(ffmpegPath, config.getPort(), {
+    const rm = new RelayManager(config.getPort(), {
       onRelayStarted: (destinationId) => {
         emit({ event: "relay_started", destinationId });
       },
@@ -119,6 +116,7 @@ function main(): void {
       serverRunning: rtmpServer?.isRunning() ?? false,
       port: config.getPort(),
       streamActive: rtmpServer?.hasActiveStream() ?? false,
+      pushing: relayManager?.isPushing() ?? false,
       relays: relayManager?.getStatuses() ?? [],
       destinations: config.getDestinations(),
       debugMode: config.getDebugMode(),
@@ -160,6 +158,16 @@ function main(): void {
           event: "destinations_updated",
           destinations: config.getDestinations(),
         });
+        break;
+
+      case "push_destinations":
+        relayManager?.pushDestinations();
+        emitStatus();
+        break;
+
+      case "stop_pushing":
+        relayManager?.stopPushing();
+        emitStatus();
         break;
 
       case "get_status":

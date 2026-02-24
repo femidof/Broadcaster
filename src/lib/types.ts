@@ -28,6 +28,7 @@ export interface AppStatus {
   serverRunning: boolean;
   port: number;
   streamActive: boolean;
+  pushing: boolean;
   relays: RelayStatus[];
   destinations: Destination[];
   debugMode: boolean;
@@ -48,6 +49,7 @@ export type SidecarEvent =
       serverRunning: boolean;
       port: number;
       streamActive: boolean;
+      pushing: boolean;
       relays: RelayStatus[];
       destinations: Destination[];
       debugMode: boolean;

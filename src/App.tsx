@@ -13,6 +13,7 @@ const DEFAULT_STATUS: AppStatus = {
   serverRunning: false,
   port: 1935,
   streamActive: false,
+  pushing: false,
   relays: [],
   destinations: [],
   debugMode: false,
@@ -78,6 +79,7 @@ export default function App() {
         setStatus((prev) => ({
           ...prev,
           streamActive: false,
+          pushing: false,
           relays: prev.relays.map((r) => ({ ...r, status: "idle" as const })),
         }));
         break;
@@ -120,6 +122,7 @@ export default function App() {
           serverRunning: event.serverRunning,
           port: event.port,
           streamActive: event.streamActive,
+          pushing: event.pushing,
           relays: event.relays,
           destinations: event.destinations,
           debugMode: event.debugMode,
@@ -179,6 +182,26 @@ export default function App() {
       await api.stopServer();
     } catch (e) {
       const msg = `Failed to stop server: ${toErrorMessage(e)}`;
+      console.error(msg, e);
+      pushDebugLog("ui", msg, "error");
+    }
+  }
+
+  async function handlePushDestinations() {
+    try {
+      await api.pushDestinations();
+    } catch (e) {
+      const msg = `Failed to push destinations: ${toErrorMessage(e)}`;
+      console.error(msg, e);
+      pushDebugLog("ui", msg, "error");
+    }
+  }
+
+  async function handleStopPushing() {
+    try {
+      await api.stopPushing();
+    } catch (e) {
+      const msg = `Failed to stop pushing: ${toErrorMessage(e)}`;
       console.error(msg, e);
       pushDebugLog("ui", msg, "error");
     }
@@ -259,6 +282,8 @@ export default function App() {
           status={status}
           onStartServer={handleStartServer}
           onStopServer={handleStopServer}
+          onPushDestinations={handlePushDestinations}
+          onStopPushing={handleStopPushing}
           onRefresh={() => api.getStatus().catch(console.error)}
         />
       )}

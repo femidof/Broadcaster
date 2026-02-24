@@ -31,6 +31,8 @@ export type InboundCommand =
   | { cmd: "add_destination"; destination: Destination }
   | { cmd: "remove_destination"; id: string }
   | { cmd: "update_destination"; destination: Destination }
+  | { cmd: "push_destinations" }
+  | { cmd: "stop_pushing" }
   | { cmd: "get_status" }
   | { cmd: "set_debug_mode"; enabled: boolean }
   | { cmd: "shutdown" };
@@ -50,6 +52,7 @@ export type OutboundEvent =
       serverRunning: boolean;
       port: number;
       streamActive: boolean;
+      pushing: boolean;
       relays: RelayStatus[];
       destinations: Destination[];
       debugMode: boolean;

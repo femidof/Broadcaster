@@ -1,9 +1,9 @@
-import { ChildProcess, spawn } from "child_process";
 import { Destination, RelayStatus } from "./types";
+import { DirectRelay } from "./rtmp-relay";
 
 interface RelayProcess {
   destination: Destination;
-  process: ChildProcess | null;
+  relay: DirectRelay | null;
   status: "idle" | "live" | "error";
   error?: string;
   restartCount: number;
@@ -24,24 +24,23 @@ const MAX_RESTART_DELAY_MS = 60_000;
 
 export class RelayManager {
   private relays = new Map<string, RelayProcess>();
-  private ffmpegPath: string;
   private ingestPort: number;
   private callbacks: RelayManagerCallbacks;
   private streamActive = false;
   private activeStreamKey: string | null = null;
+  private pushing = false;
 
-  constructor(
-    ffmpegPath: string,
-    ingestPort: number,
-    callbacks: RelayManagerCallbacks
-  ) {
-    this.ffmpegPath = ffmpegPath;
+  constructor(ingestPort: number, callbacks: RelayManagerCallbacks) {
     this.ingestPort = ingestPort;
     this.callbacks = callbacks;
   }
 
   setIngestPort(port: number): void {
     this.ingestPort = port;
+  }
+
+  isPushing(): boolean {
+    return this.pushing;
   }
 
   onStreamConnect(streamKey: string): void {
@@ -51,12 +50,6 @@ export class RelayManager {
       "relay-manager",
       `Source stream connected: ${streamKey}`
     );
-    for (const [, relay] of this.relays) {
-      relay.restartCount = 0;
-      if (relay.destination.enabled && !relay.stopped) {
-        this.startRelay(relay);
-      }
-    }
   }
 
   onStreamDisconnect(streamKey: string): void {
@@ -70,25 +63,56 @@ export class RelayManager {
 
     this.streamActive = false;
     this.activeStreamKey = null;
+
+    if (this.pushing) {
+      this.callbacks.onDebugLog?.(
+        "relay-manager",
+        "Source disconnected — stopping all relays"
+      );
+      this.stopPushing();
+    }
+  }
+
+  pushDestinations(): void {
+    if (!this.streamActive || !this.activeStreamKey) {
+      this.callbacks.onDebugLog?.(
+        "relay-manager",
+        "Cannot push: no active source stream"
+      );
+      return;
+    }
+
+    this.pushing = true;
+    this.callbacks.onDebugLog?.("relay-manager", "Starting push to all enabled destinations");
+
     for (const [, relay] of this.relays) {
-      this.stopRelay(relay, "source_disconnected");
+      relay.restartCount = 0;
+      relay.stopped = false;
+      if (relay.destination.enabled) {
+        this.startRelay(relay);
+      }
+    }
+  }
+
+  stopPushing(): void {
+    this.pushing = false;
+    this.callbacks.onDebugLog?.("relay-manager", "Stopping push to all destinations");
+
+    for (const [, relay] of this.relays) {
+      this.stopRelay(relay, "push_stopped");
     }
   }
 
   addDestination(dest: Destination): void {
     const relay: RelayProcess = {
       destination: dest,
-      process: null,
+      relay: null,
       status: "idle",
       restartCount: 0,
       restartTimer: null,
       stopped: false,
     };
     this.relays.set(dest.id, relay);
-
-    if (dest.enabled && this.streamActive) {
-      this.startRelay(relay);
-    }
   }
 
   updateDestination(dest: Destination): void {
@@ -104,6 +128,8 @@ export class RelayManager {
       existing.destination.streamKey !== dest.streamKey;
 
     existing.destination = dest;
+
+    if (!this.pushing) return;
 
     if (!dest.enabled && wasEnabled) {
       existing.stopped = true;
@@ -145,6 +171,7 @@ export class RelayManager {
   }
 
   stopAll(): void {
+    this.pushing = false;
     for (const [, relay] of this.relays) {
       relay.stopped = true;
       this.stopRelay(relay, "shutdown");
@@ -157,7 +184,7 @@ export class RelayManager {
   }
 
   private startRelay(relay: RelayProcess): void {
-    if (relay.process || relay.stopped) return;
+    if (relay.relay || relay.stopped) return;
 
     if (!this.activeStreamKey) {
       relay.status = "idle";
@@ -171,80 +198,52 @@ export class RelayManager {
     const inputUrl = `rtmp://127.0.0.1:${this.ingestPort}/live/${this.activeStreamKey}`;
     const outputUrl = this.buildRtmpUrl(relay.destination);
 
-    const args = [
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-rw_timeout",
-      "10000000",
-      "-i",
-      inputUrl,
-      "-c",
-      "copy",
-      "-f",
-      "flv",
-      "-flvflags",
-      "no_duration_filesize",
-      outputUrl,
-    ];
-
     try {
-      const proc = spawn(this.ffmpegPath, args, {
-        stdio: ["pipe", "pipe", "pipe"],
+      const directRelay = new DirectRelay(inputUrl, outputUrl, relay.destination.name, {
+        onStarted: () => {
+          relay.status = "live";
+          relay.error = undefined;
+          this.callbacks.onRelayStarted(relay.destination.id);
+        },
+        onStopped: (reason) => {
+          relay.relay = null;
+          if (relay.stopped) {
+            relay.status = "idle";
+            return;
+          }
+          if (this.streamActive && this.pushing) {
+            relay.status = "error";
+            relay.error = `Relay stopped: ${reason}`;
+            relay.restartCount++;
+            this.callbacks.onRelayError(relay.destination.id, relay.error);
+            this.scheduleRestart(relay);
+          } else {
+            relay.status = "idle";
+            this.callbacks.onRelayStopped(relay.destination.id, reason);
+          }
+        },
+        onError: (error) => {
+          relay.relay = null;
+          relay.status = "error";
+          relay.error = error;
+          this.callbacks.onRelayError(relay.destination.id, error);
+          if (!relay.stopped && this.streamActive && this.pushing) {
+            relay.restartCount++;
+            this.scheduleRestart(relay);
+          }
+        },
+        onDebugLog: (message) => {
+          this.callbacks.onDebugLog?.(
+            `relay:${relay.destination.name}`,
+            message
+          );
+        },
       });
 
-      relay.process = proc;
+      relay.relay = directRelay;
       relay.status = "live";
       relay.error = undefined;
-      this.callbacks.onRelayStarted(relay.destination.id);
-
-      proc.stderr?.on("data", (data: Buffer) => {
-        const msg = data.toString().trim();
-        if (msg) {
-          this.callbacks.onDebugLog?.(
-            `ffmpeg:${relay.destination.name}`,
-            msg
-          );
-        }
-      });
-
-      proc.on("close", (code) => {
-        relay.process = null;
-
-        if (relay.stopped) {
-          relay.status = "idle";
-          return;
-        }
-
-        if (code !== 0 && this.streamActive) {
-          relay.status = "error";
-          relay.error = `FFmpeg exited with code ${code}`;
-          relay.restartCount++;
-          this.callbacks.onRelayError(
-            relay.destination.id,
-            relay.error
-          );
-          this.scheduleRestart(relay);
-        } else {
-          relay.status = "idle";
-          this.callbacks.onRelayStopped(
-            relay.destination.id,
-            `exited with code ${code}`
-          );
-        }
-      });
-
-      proc.on("error", (err) => {
-        relay.process = null;
-        relay.status = "error";
-        relay.error = err.message;
-        this.callbacks.onRelayError(relay.destination.id, err.message);
-
-        if (!relay.stopped && this.streamActive) {
-          relay.restartCount++;
-          this.scheduleRestart(relay);
-        }
-      });
+      directRelay.start();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       relay.status = "error";
@@ -259,20 +258,13 @@ export class RelayManager {
       relay.restartTimer = null;
     }
 
-    if (relay.process) {
-      const proc = relay.process;
-      relay.process = null;
+    if (relay.relay) {
+      const directRelay = relay.relay;
+      relay.relay = null;
       try {
-        proc.kill("SIGTERM");
-        setTimeout(() => {
-          try {
-            proc.kill("SIGKILL");
-          } catch {
-            // already dead
-          }
-        }, 3000);
+        directRelay.stop();
       } catch {
-        // already dead
+        // already stopped
       }
       relay.status = "idle";
       this.callbacks.onRelayStopped(relay.destination.id, reason);
@@ -280,7 +272,7 @@ export class RelayManager {
   }
 
   private scheduleRestart(relay: RelayProcess): void {
-    if (relay.stopped || !this.streamActive) return;
+    if (relay.stopped || !this.streamActive || !this.pushing) return;
 
     if (relay.restartCount >= MAX_RESTARTS) {
       relay.status = "error";
@@ -305,7 +297,7 @@ export class RelayManager {
 
     relay.restartTimer = setTimeout(() => {
       relay.restartTimer = null;
-      if (!relay.stopped && this.streamActive && relay.destination.enabled) {
+      if (!relay.stopped && this.streamActive && relay.destination.enabled && this.pushing) {
         this.startRelay(relay);
       }
     }, delay);

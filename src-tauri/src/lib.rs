@@ -51,6 +51,22 @@ async fn remove_destination(app: tauri::AppHandle, id: String) -> Result<(), Str
 }
 
 #[tauri::command]
+async fn push_destinations(app: tauri::AppHandle) -> Result<(), String> {
+    let cmd = serde_json::json!({
+        "cmd": "push_destinations",
+    });
+    ensure_sidecar_and_send(&app, cmd.to_string()).await
+}
+
+#[tauri::command]
+async fn stop_pushing(app: tauri::AppHandle) -> Result<(), String> {
+    let cmd = serde_json::json!({
+        "cmd": "stop_pushing",
+    });
+    ensure_sidecar_and_send(&app, cmd.to_string()).await
+}
+
+#[tauri::command]
 async fn start_server(app: tauri::AppHandle, port: u16) -> Result<(), String> {
     let cmd = serde_json::json!({
         "cmd": "start_server",
@@ -116,6 +132,8 @@ pub fn run() {
             add_destination,
             update_destination,
             remove_destination,
+            push_destinations,
+            stop_pushing,
             start_server,
             stop_server,
             get_status,

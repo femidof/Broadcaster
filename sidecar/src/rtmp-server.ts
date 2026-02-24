@@ -27,8 +27,8 @@ export class RtmpServer {
         port: this.port,
         chunk_size: 60000,
         gop_cache: true,
-        ping: 30,
-        ping_timeout: 60,
+        ping: 86400,
+        ping_timeout: 86400,
       },
     };
 

@@ -5,6 +5,8 @@ import {
   Circle,
   AlertCircle,
   RefreshCw,
+  Play,
+  Square,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +17,8 @@ interface DashboardProps {
   status: AppStatus;
   onStartServer: () => void;
   onStopServer: () => void;
+  onPushDestinations: () => void;
+  onStopPushing: () => void;
   onRefresh: () => void;
 }
 
@@ -33,8 +37,14 @@ export function Dashboard({
   status,
   onStartServer,
   onStopServer,
+  onPushDestinations,
+  onStopPushing,
   onRefresh,
 }: DashboardProps) {
+  const enabledDestinations = status.destinations.filter((d) => d.enabled);
+  const canGoLive =
+    status.streamActive && enabledDestinations.length > 0 && !status.pushing;
+
   return (
     <div className="space-y-6">
       {/* Server Status */}
@@ -113,6 +123,51 @@ export function Dashboard({
         </CardContent>
       </Card>
 
+      {/* Go Live Control */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">
+                {status.pushing
+                  ? "Streaming to destinations"
+                  : status.streamActive
+                    ? "Source connected — ready to go live"
+                    : "Waiting for source stream"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {status.pushing
+                  ? `Pushing to ${enabledDestinations.length} destination${enabledDestinations.length !== 1 ? "s" : ""}`
+                  : !status.streamActive
+                    ? "Connect OBS or your encoder first"
+                    : enabledDestinations.length === 0
+                      ? "Enable at least one destination"
+                      : `${enabledDestinations.length} destination${enabledDestinations.length !== 1 ? "s" : ""} ready`}
+              </p>
+            </div>
+            {status.pushing ? (
+              <Button
+                variant="destructive"
+                onClick={onStopPushing}
+                className="gap-2"
+              >
+                <Square className="h-4 w-4" />
+                Stop Pushing
+              </Button>
+            ) : (
+              <Button
+                onClick={onPushDestinations}
+                disabled={!canGoLive}
+                className="gap-2"
+              >
+                <Play className="h-4 w-4" />
+                Go Live
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Relay Status */}
       <Card>
         <CardHeader className="pb-3">
@@ -173,7 +228,8 @@ export function Dashboard({
               </code>
               )
             </li>
-            <li>Start streaming in OBS — relays begin automatically</li>
+            <li>Start streaming in OBS</li>
+            <li>Click "Go Live" to push to your destinations</li>
           </ol>
         </CardContent>
       </Card>
