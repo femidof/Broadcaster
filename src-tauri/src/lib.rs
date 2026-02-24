@@ -1,7 +1,12 @@
 mod sidecar;
 
 use sidecar::{Destination, SidecarState};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+
+async fn ensure_sidecar_and_send(app: &tauri::AppHandle, command: String) -> Result<(), String> {
+    sidecar::spawn_sidecar(app).await?;
+    sidecar::send_to_sidecar(app, &command).await
+}
 
 #[tauri::command]
 async fn start_sidecar(app: tauri::AppHandle) -> Result<(), String> {
@@ -15,7 +20,7 @@ async fn stop_sidecar(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 async fn send_command(app: tauri::AppHandle, command: String) -> Result<(), String> {
-    sidecar::send_to_sidecar(&app, &command).await
+    ensure_sidecar_and_send(&app, command).await
 }
 
 #[tauri::command]
@@ -24,7 +29,7 @@ async fn add_destination(app: tauri::AppHandle, destination: Destination) -> Res
         "cmd": "add_destination",
         "destination": destination,
     });
-    sidecar::send_to_sidecar(&app, &cmd.to_string()).await
+    ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
 
 #[tauri::command]
@@ -33,7 +38,7 @@ async fn update_destination(app: tauri::AppHandle, destination: Destination) -> 
         "cmd": "update_destination",
         "destination": destination,
     });
-    sidecar::send_to_sidecar(&app, &cmd.to_string()).await
+    ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
 
 #[tauri::command]
@@ -42,7 +47,7 @@ async fn remove_destination(app: tauri::AppHandle, id: String) -> Result<(), Str
         "cmd": "remove_destination",
         "id": id,
     });
-    sidecar::send_to_sidecar(&app, &cmd.to_string()).await
+    ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
 
 #[tauri::command]
@@ -51,7 +56,7 @@ async fn start_server(app: tauri::AppHandle, port: u16) -> Result<(), String> {
         "cmd": "start_server",
         "port": port,
     });
-    sidecar::send_to_sidecar(&app, &cmd.to_string()).await
+    ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
 
 #[tauri::command]
@@ -59,7 +64,7 @@ async fn stop_server(app: tauri::AppHandle) -> Result<(), String> {
     let cmd = serde_json::json!({
         "cmd": "stop_server",
     });
-    sidecar::send_to_sidecar(&app, &cmd.to_string()).await
+    ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
 
 #[tauri::command]
@@ -67,7 +72,7 @@ async fn get_status(app: tauri::AppHandle) -> Result<(), String> {
     let cmd = serde_json::json!({
         "cmd": "get_status",
     });
-    sidecar::send_to_sidecar(&app, &cmd.to_string()).await
+    ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -76,18 +81,28 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Debug)
-                        .build(),
-                )?;
-            }
+            let log_level = if cfg!(debug_assertions) {
+                log::LevelFilter::Debug
+            } else {
+                log::LevelFilter::Info
+            };
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log_level)
+                    .build(),
+            )?;
 
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = sidecar::spawn_sidecar(&handle).await {
                     log::error!("Failed to start sidecar: {e}");
+                    let _ = handle.emit(
+                        "sidecar-event",
+                        serde_json::json!({
+                            "event": "sidecar_error",
+                            "error": format!("Failed to start sidecar: {e}")
+                        }),
+                    );
                 }
             });
 

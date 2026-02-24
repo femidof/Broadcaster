@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Layout, type TabId } from "@/components/layout";
 import { Dashboard } from "@/components/dashboard";
 import { DestinationsPanel } from "@/components/destinations-panel";
 import { SettingsPanel } from "@/components/settings-panel";
+import { type DebugLogEntry } from "@/components/debug-panel";
 import type { AppStatus, Destination, SidecarEvent } from "@/lib/types";
 import * as api from "@/lib/tauri";
+
+const MAX_DEBUG_LOGS = 500;
 
 const DEFAULT_STATUS: AppStatus = {
   serverRunning: false,
@@ -12,12 +15,37 @@ const DEFAULT_STATUS: AppStatus = {
   streamActive: false,
   relays: [],
   destinations: [],
+  debugMode: false,
 };
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [status, setStatus] = useState<AppStatus>(DEFAULT_STATUS);
   const [autoStart, setAutoStart] = useState(true);
+  const [debugLogs, setDebugLogs] = useState<DebugLogEntry[]>([]);
+  const logIdRef = useRef(0);
+
+  const pushDebugLog = useCallback(
+    (source: string, message: string, level: DebugLogEntry["level"], timestamp?: number) => {
+      setDebugLogs((prev) => {
+        const entry: DebugLogEntry = {
+          id: ++logIdRef.current,
+          source,
+          message,
+          timestamp: timestamp ?? Date.now(),
+          level,
+        };
+        const next = [...prev, entry];
+        return next.length > MAX_DEBUG_LOGS ? next.slice(-MAX_DEBUG_LOGS) : next;
+      });
+    },
+    []
+  );
 
   const handleSidecarEvent = useCallback((event: SidecarEvent) => {
     switch (event.event) {
@@ -94,6 +122,7 @@ export default function App() {
           streamActive: event.streamActive,
           relays: event.relays,
           destinations: event.destinations,
+          debugMode: event.debugMode,
         });
         break;
 
@@ -104,15 +133,23 @@ export default function App() {
         }));
         break;
 
+      case "debug_log":
+        pushDebugLog(event.source, event.message, "info", event.timestamp);
+        break;
+
+      case "sidecar_error":
+        pushDebugLog("sidecar", event.error, "error");
+        break;
+
       case "server_error":
-        console.error("Server error:", event.error);
+        pushDebugLog("server", event.error, "error");
         break;
 
       case "error":
-        console.error("Sidecar error:", event.error);
+        pushDebugLog("sidecar", event.error, "error");
         break;
     }
-  }, []);
+  }, [pushDebugLog]);
 
   useEffect(() => {
     const unlistenPromise = api.onSidecarEvent(handleSidecarEvent);
@@ -131,7 +168,9 @@ export default function App() {
     try {
       await api.startServer(status.port);
     } catch (e) {
-      console.error("Failed to start server:", e);
+      const msg = `Failed to start server on port ${status.port}: ${toErrorMessage(e)}`;
+      console.error(msg, e);
+      pushDebugLog("ui", msg, "error");
     }
   }
 
@@ -139,7 +178,9 @@ export default function App() {
     try {
       await api.stopServer();
     } catch (e) {
-      console.error("Failed to stop server:", e);
+      const msg = `Failed to stop server: ${toErrorMessage(e)}`;
+      console.error(msg, e);
+      pushDebugLog("ui", msg, "error");
     }
   }
 
@@ -147,7 +188,9 @@ export default function App() {
     try {
       await api.addDestination(dest);
     } catch (e) {
-      console.error("Failed to add destination:", e);
+      const msg = `Failed to add destination ${dest.name}: ${toErrorMessage(e)}`;
+      console.error(msg, e);
+      pushDebugLog("ui", msg, "error");
     }
   }
 
@@ -155,7 +198,9 @@ export default function App() {
     try {
       await api.updateDestination(dest);
     } catch (e) {
-      console.error("Failed to update destination:", e);
+      const msg = `Failed to update destination ${dest.name}: ${toErrorMessage(e)}`;
+      console.error(msg, e);
+      pushDebugLog("ui", msg, "error");
     }
   }
 
@@ -163,15 +208,36 @@ export default function App() {
     try {
       await api.removeDestination(id);
     } catch (e) {
-      console.error("Failed to remove destination:", e);
+      const msg = `Failed to remove destination ${id}: ${toErrorMessage(e)}`;
+      console.error(msg, e);
+      pushDebugLog("ui", msg, "error");
     }
   }
 
   async function handlePortChange(port: number) {
     setStatus((prev) => ({ ...prev, port }));
     if (status.serverRunning) {
-      await api.stopServer().catch(console.error);
-      await api.startServer(port).catch(console.error);
+      await api.stopServer().catch((e) => {
+        const msg = `Failed to stop server before port change: ${toErrorMessage(e)}`;
+        console.error(msg, e);
+        pushDebugLog("ui", msg, "error");
+      });
+      await api.startServer(port).catch((e) => {
+        const msg = `Failed to restart server on port ${port}: ${toErrorMessage(e)}`;
+        console.error(msg, e);
+        pushDebugLog("ui", msg, "error");
+      });
+    }
+  }
+
+  async function handleDebugModeChange(enabled: boolean) {
+    setStatus((prev) => ({ ...prev, debugMode: enabled }));
+    try {
+      await api.setDebugMode(enabled);
+    } catch (e) {
+      const msg = `Failed to set debug mode to ${enabled}: ${toErrorMessage(e)}`;
+      console.error(msg, e);
+      pushDebugLog("ui", msg, "error");
     }
   }
 
@@ -181,7 +247,13 @@ export default function App() {
   }
 
   return (
-    <Layout activeTab={activeTab} onTabChange={setActiveTab}>
+    <Layout
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      debugMode={status.debugMode}
+      debugLogs={debugLogs}
+      onClearDebugLogs={() => setDebugLogs([])}
+    >
       {activeTab === "dashboard" && (
         <Dashboard
           status={status}
@@ -203,8 +275,10 @@ export default function App() {
         <SettingsPanel
           port={status.port}
           autoStart={autoStart}
+          debugMode={status.debugMode}
           onPortChange={handlePortChange}
           onAutoStartChange={setAutoStart}
+          onDebugModeChange={handleDebugModeChange}
           onCheckUpdates={handleCheckUpdates}
         />
       )}

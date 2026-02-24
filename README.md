@@ -1,6 +1,6 @@
 # Broadcaster
 
-A lightweight desktop multistream relay app. Stream to Twitch, YouTube, and custom RTMP destinations simultaneously from a single OBS connection.
+A lightweight desktop multistream relay app. Stream to Twitch, YouTube, Facebook Live, Instagram Live, TikTok Live, Trovo, Kick, Restream, and custom RTMP destinations simultaneously from a single OBS connection.
 
 Built with **Tauri v2** (Rust) + **React** + **Node.js sidecar**.
 
@@ -9,6 +9,12 @@ Built with **Tauri v2** (Rust) + **React** + **Node.js sidecar**.
 ```
 OBS → localhost:1935 → Broadcaster → Twitch
                                    → YouTube
+                                   → Facebook Live
+                                   → Instagram Live
+                                   → TikTok Live
+                                   → Trovo
+                                   → Kick
+                                   → Restream
                                    → Custom RTMP
 ```
 
@@ -69,8 +75,12 @@ Outputs:
 1. Open OBS → Settings → Stream
 2. Set Service to **Custom**
 3. Server: `rtmp://localhost:1935/live`
-4. Stream Key: `stream` (or any key)
+4. Stream Key: `stream` (or any non-empty key)
 5. Click **Start Streaming**
+
+Notes:
+- Broadcaster starts relaying from the exact stream key OBS publishes (for example, `/live/stream` or `/live/myKey`).
+- `Incoming connection` in Debug Output means a client connected to RTMP. Relays and stream status only switch to active after publish begins.
 
 ## Project Structure
 
@@ -109,6 +119,21 @@ React Frontend ←→ Tauri Rust Core ←→ Node Sidecar (stdin/stdout JSON)
 - **Rust Core**: Manages sidecar lifecycle, relays events to frontend
 - **Node Sidecar**: Compiled to standalone binary via `pkg`, handles RTMP and FFmpeg
 - **Communication**: JSON lines over stdin/stdout between Rust and Node
+
+## Debug Mode (Release Builds)
+
+If the app isn't working as expected after install, enable **Debug Mode** to see diagnostic output:
+
+1. Open the app and go to **Settings**
+2. Toggle **Debug Mode** on
+3. A **Debug Output** panel appears below the settings, showing:
+   - Sidecar process stderr and startup errors
+   - FFmpeg relay errors and output
+   - RTMP server connection events
+   - Abnormal sidecar termination details
+4. The setting persists across restarts
+
+This surfaces errors that would otherwise only appear in system logs, making it easy to diagnose issues like port conflicts, missing binaries, or FFmpeg failures without external tooling.
 
 ## Updater
 

@@ -10,6 +10,17 @@ import { execSync } from "child_process";
 import { existsSync, statSync } from "fs";
 import { resolve, join } from "path";
 
+function parseArgs() {
+  const args = process.argv.slice(2);
+  let target = null;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--target" && args[i + 1]) {
+      target = args[++i];
+    }
+  }
+  return { target };
+}
+
 function getHostTriple() {
   return execSync("rustc --print host-tuple", { encoding: "utf-8" }).trim();
 }
@@ -20,9 +31,11 @@ function isBinaryReady(filePath) {
 }
 
 function main() {
-  const targetTriple = getHostTriple();
+  const { target: requestedTarget } = parseArgs();
+  const targetTriple = requestedTarget || getHostTriple();
   const rootDir = resolve(import.meta.dirname, "..");
   const binariesDir = join(rootDir, "src-tauri", "binaries");
+  const targetArgs = requestedTarget ? ` -- --target ${requestedTarget}` : "";
 
   const ext = targetTriple.includes("windows") ? ".exe" : "";
   const sidecarPath = join(binariesDir, `broadcaster-sidecar-${targetTriple}${ext}`);
@@ -33,13 +46,13 @@ function main() {
   if (!isBinaryReady(ffmpegPath)) {
     needed.push("ffmpeg");
     console.log(`[ensure-binaries] ffmpeg binary missing or empty, downloading...`);
-    execSync("npm run ffmpeg:download", { cwd: rootDir, stdio: "inherit" });
+    execSync(`npm run ffmpeg:download${targetArgs}`, { cwd: rootDir, stdio: "inherit" });
   }
 
   if (!isBinaryReady(sidecarPath)) {
     needed.push("sidecar");
     console.log(`[ensure-binaries] sidecar binary missing or empty, building...`);
-    execSync("npm run sidecar:build", { cwd: rootDir, stdio: "inherit" });
+    execSync(`npm run sidecar:build${targetArgs}`, { cwd: rootDir, stdio: "inherit" });
   }
 
   if (needed.length === 0) {

@@ -5,6 +5,7 @@ import { AppConfig, Destination } from "./types";
 const DEFAULT_CONFIG: AppConfig = {
   port: 1935,
   autoStart: true,
+  debugMode: false,
   destinations: [],
 };
 
@@ -66,6 +67,15 @@ export class ConfigStore {
 
   setAutoStart(autoStart: boolean): void {
     this.config.autoStart = autoStart;
+    this.save();
+  }
+
+  getDebugMode(): boolean {
+    return this.config.debugMode;
+  }
+
+  setDebugMode(enabled: boolean): void {
+    this.config.debugMode = enabled;
     this.save();
   }
 

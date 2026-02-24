@@ -8,7 +8,7 @@
  */
 
 import { execSync } from "child_process";
-import { existsSync, mkdirSync, copyFileSync, chmodSync } from "fs";
+import { existsSync, mkdirSync, copyFileSync, chmodSync, statSync } from "fs";
 import { resolve, join } from "path";
 
 function getHostTriple() {
@@ -40,14 +40,14 @@ function main() {
   const ext = targetTriple.includes("windows") ? ".exe" : "";
   const destPath = join(binariesDir, `ffmpeg-${targetTriple}${ext}`);
 
-  if (existsSync(destPath)) {
+  if (existsSync(destPath) && statSync(destPath).size > 0) {
     console.log(`FFmpeg binary already exists: ${destPath}`);
     return;
   }
 
   // Install ffmpeg-static temporarily to get the binary
   console.log("Installing ffmpeg-static to get binary...");
-  const tmpDir = join(rootDir, ".ffmpeg-tmp");
+  const tmpDir = join(rootDir, "ffmpeg-tmp");
   if (!existsSync(tmpDir)) {
     mkdirSync(tmpDir, { recursive: true });
   }

@@ -15,7 +15,12 @@ export interface RelayManagerCallbacks {
   onRelayStarted: (destinationId: string) => void;
   onRelayStopped: (destinationId: string, reason: string) => void;
   onRelayError: (destinationId: string, error: string) => void;
+  onDebugLog?: (source: string, message: string) => void;
 }
+
+const MAX_RESTARTS = 5;
+const BASE_RESTART_DELAY_MS = 5_000;
+const MAX_RESTART_DELAY_MS = 60_000;
 
 export class RelayManager {
   private relays = new Map<string, RelayProcess>();
@@ -23,6 +28,7 @@ export class RelayManager {
   private ingestPort: number;
   private callbacks: RelayManagerCallbacks;
   private streamActive = false;
+  private activeStreamKey: string | null = null;
 
   constructor(
     ffmpegPath: string,
@@ -38,17 +44,32 @@ export class RelayManager {
     this.ingestPort = port;
   }
 
-  onStreamConnect(): void {
+  onStreamConnect(streamKey: string): void {
     this.streamActive = true;
+    this.activeStreamKey = streamKey;
+    this.callbacks.onDebugLog?.(
+      "relay-manager",
+      `Source stream connected: ${streamKey}`
+    );
     for (const [, relay] of this.relays) {
+      relay.restartCount = 0;
       if (relay.destination.enabled && !relay.stopped) {
         this.startRelay(relay);
       }
     }
   }
 
-  onStreamDisconnect(): void {
+  onStreamDisconnect(streamKey: string): void {
+    if (this.activeStreamKey && this.activeStreamKey !== streamKey) {
+      this.callbacks.onDebugLog?.(
+        "relay-manager",
+        `Ignoring disconnect for inactive stream key: ${streamKey}`
+      );
+      return;
+    }
+
     this.streamActive = false;
+    this.activeStreamKey = null;
     for (const [, relay] of this.relays) {
       this.stopRelay(relay, "source_disconnected");
     }
@@ -138,7 +159,16 @@ export class RelayManager {
   private startRelay(relay: RelayProcess): void {
     if (relay.process || relay.stopped) return;
 
-    const inputUrl = `rtmp://127.0.0.1:${this.ingestPort}/live/stream`;
+    if (!this.activeStreamKey) {
+      relay.status = "idle";
+      this.callbacks.onDebugLog?.(
+        "relay-manager",
+        `Cannot start relay for ${relay.destination.name}: no active stream key`
+      );
+      return;
+    }
+
+    const inputUrl = `rtmp://127.0.0.1:${this.ingestPort}/live/${this.activeStreamKey}`;
     const outputUrl = this.buildRtmpUrl(relay.destination);
 
     const args = [
@@ -171,8 +201,9 @@ export class RelayManager {
       proc.stderr?.on("data", (data: Buffer) => {
         const msg = data.toString().trim();
         if (msg) {
-          console.error(
-            `[ffmpeg:${relay.destination.name}] ${msg}`
+          this.callbacks.onDebugLog?.(
+            `ffmpeg:${relay.destination.name}`,
+            msg
           );
         }
       });
@@ -251,10 +282,25 @@ export class RelayManager {
   private scheduleRestart(relay: RelayProcess): void {
     if (relay.stopped || !this.streamActive) return;
 
-    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
+    if (relay.restartCount >= MAX_RESTARTS) {
+      relay.status = "error";
+      relay.error = `Relay stopped after ${MAX_RESTARTS} failed attempts — disable and re-enable the destination to retry`;
+      this.callbacks.onRelayError(relay.destination.id, relay.error);
+      this.callbacks.onDebugLog?.(
+        "relay-manager",
+        `[${relay.destination.name}] Retry limit reached (${MAX_RESTARTS}), giving up`
+      );
+      return;
+    }
+
     const delay = Math.min(
-      1000 * Math.pow(2, relay.restartCount - 1),
-      30000
+      BASE_RESTART_DELAY_MS * Math.pow(2, relay.restartCount - 1),
+      MAX_RESTART_DELAY_MS
+    );
+
+    this.callbacks.onDebugLog?.(
+      "relay-manager",
+      `[${relay.destination.name}] Scheduling retry ${relay.restartCount}/${MAX_RESTARTS} in ${delay / 1000}s`
     );
 
     relay.restartTimer = setTimeout(() => {

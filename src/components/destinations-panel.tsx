@@ -46,6 +46,8 @@ export function DestinationsPanel({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Destination | null>(null);
   const [form, setForm] = useState<Destination>({ ...EMPTY_DESTINATION });
+  const selectedPreset =
+    form.platform !== "custom" ? PLATFORM_PRESETS[form.platform] : undefined;
 
   function openAdd() {
     setEditing(null);
@@ -63,11 +65,15 @@ export function DestinationsPanel({
     const p = platform as Destination["platform"];
     const newForm = { ...form, platform: p };
 
-    if (p === "twitch" || p === "youtube") {
+    if (p !== "custom") {
       const preset = PLATFORM_PRESETS[p];
-      newForm.url = preset.url;
-      if (!newForm.name) {
-        newForm.name = preset.label;
+      if (preset) {
+        if (preset.url) {
+          newForm.url = preset.url;
+        }
+        if (!newForm.name) {
+          newForm.name = preset.label;
+        }
       }
     }
 
@@ -140,8 +146,11 @@ export function DestinationsPanel({
                 value={form.platform}
                 onValueChange={handlePlatformChange}
               >
-                <option value="twitch">Twitch</option>
-                <option value="youtube">YouTube</option>
+                {Object.entries(PLATFORM_PRESETS).map(([platform, preset]) => (
+                  <option key={platform} value={platform}>
+                    {preset.label}
+                  </option>
+                ))}
                 <option value="custom">Custom RTMP</option>
               </Select>
             </div>
@@ -164,6 +173,11 @@ export function DestinationsPanel({
                 value={form.url}
                 onChange={(e) => setForm({ ...form, url: e.target.value })}
               />
+              {selectedPreset?.urlHint ? (
+                <p className="text-xs text-muted-foreground">
+                  {selectedPreset.urlHint}
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-2">

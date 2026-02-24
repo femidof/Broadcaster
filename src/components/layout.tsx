@@ -1,5 +1,6 @@
 import { Radio, Send, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DebugPanel, type DebugLogEntry } from "@/components/debug-panel";
 
 const tabs = [
   { id: "dashboard" as const, label: "Dashboard", icon: Radio },
@@ -13,9 +14,19 @@ interface LayoutProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
   children: React.ReactNode;
+  debugMode?: boolean;
+  debugLogs?: DebugLogEntry[];
+  onClearDebugLogs?: () => void;
 }
 
-export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
+export function Layout({
+  activeTab,
+  onTabChange,
+  children,
+  debugMode = false,
+  debugLogs = [],
+  onClearDebugLogs,
+}: LayoutProps) {
   return (
     <div className="flex h-screen flex-col">
       {/* Header */}
@@ -50,7 +61,14 @@ export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
         </nav>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-6">
+          {children}
+          {debugMode && (
+            <div className="mt-6">
+              <DebugPanel logs={debugLogs} onClear={() => onClearDebugLogs?.()} />
+            </div>
+          )}
+        </main>
       </div>
     </div>
   );

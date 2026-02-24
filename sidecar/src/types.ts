@@ -1,7 +1,16 @@
 export interface Destination {
   id: string;
   name: string;
-  platform: "twitch" | "youtube" | "custom";
+  platform:
+    | "twitch"
+    | "youtube"
+    | "facebook"
+    | "instagram"
+    | "tiktok"
+    | "trovo"
+    | "kick"
+    | "restream"
+    | "custom";
   url: string;
   streamKey: string;
   enabled: boolean;
@@ -23,6 +32,7 @@ export type InboundCommand =
   | { cmd: "remove_destination"; id: string }
   | { cmd: "update_destination"; destination: Destination }
   | { cmd: "get_status" }
+  | { cmd: "set_debug_mode"; enabled: boolean }
   | { cmd: "shutdown" };
 
 // Outbound events to Rust via stdout
@@ -42,13 +52,16 @@ export type OutboundEvent =
       streamActive: boolean;
       relays: RelayStatus[];
       destinations: Destination[];
+      debugMode: boolean;
     }
   | { event: "destinations_updated"; destinations: Destination[] }
+  | { event: "debug_log"; source: string; message: string; timestamp: number }
   | { event: "ready" }
   | { event: "error"; error: string };
 
 export interface AppConfig {
   port: number;
   autoStart: boolean;
+  debugMode: boolean;
   destinations: Destination[];
 }

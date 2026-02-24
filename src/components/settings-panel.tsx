@@ -9,16 +9,20 @@ import { Switch } from "@/components/ui/switch";
 interface SettingsPanelProps {
   port: number;
   autoStart: boolean;
+  debugMode: boolean;
   onPortChange: (port: number) => void;
   onAutoStartChange: (autoStart: boolean) => void;
+  onDebugModeChange: (enabled: boolean) => void;
   onCheckUpdates: () => void;
 }
 
 export function SettingsPanel({
   port,
   autoStart,
+  debugMode,
   onPortChange,
   onAutoStartChange,
+  onDebugModeChange,
   onCheckUpdates,
 }: SettingsPanelProps) {
   const [portInput, setPortInput] = useState(String(port));
@@ -65,6 +69,16 @@ export function SettingsPanel({
               </p>
             </div>
             <Switch checked={autoStart} onCheckedChange={onAutoStartChange} />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>Debug Mode</Label>
+              <p className="text-xs text-muted-foreground">
+                Show diagnostic output for troubleshooting
+              </p>
+            </div>
+            <Switch checked={debugMode} onCheckedChange={onDebugModeChange} />
           </div>
         </CardContent>
       </Card>

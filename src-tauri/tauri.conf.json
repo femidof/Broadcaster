@@ -14,9 +14,9 @@
       {
         "title": "Broadcaster",
         "label": "main",
-        "width": 900,
+        "width": 950,
         "height": 650,
-        "minWidth": 700,
+        "minWidth": 750,
         "minHeight": 500,
         "resizable": true,
         "fullscreen": false,

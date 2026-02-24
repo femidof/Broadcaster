@@ -24,9 +24,23 @@ function parseArgs(): { ffmpegPath: string; dataDir: string } {
   return { ffmpegPath, dataDir };
 }
 
+function emitDebugLog(source: string, message: string): void {
+  emit({ event: "debug_log", source, message, timestamp: Date.now() });
+}
+
 function main(): void {
   const { ffmpegPath, dataDir } = parseArgs();
   const config = new ConfigStore(dataDir);
+
+  process.on("uncaughtException", (err) => {
+    emitDebugLog("sidecar", `Uncaught exception: ${err.message}\n${err.stack ?? ""}`);
+    emit({ event: "error", error: `Uncaught exception: ${err.message}` });
+  });
+
+  process.on("unhandledRejection", (reason) => {
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    emitDebugLog("sidecar", `Unhandled rejection: ${msg}`);
+  });
 
   let rtmpServer: RtmpServer | null = null;
   let relayManager: RelayManager | null = null;
@@ -41,6 +55,11 @@ function main(): void {
       },
       onRelayError: (destinationId, error) => {
         emit({ event: "relay_error", destinationId, error });
+      },
+      onDebugLog: (source, message) => {
+        if (config.getDebugMode()) {
+          emitDebugLog(source, message);
+        }
       },
     });
 
@@ -64,11 +83,16 @@ function main(): void {
     rtmpServer = new RtmpServer(port, {
       onStreamConnect: (streamKey) => {
         emit({ event: "stream_connected", streamKey });
-        relayManager?.onStreamConnect();
+        relayManager?.onStreamConnect(streamKey);
       },
       onStreamDisconnect: (streamKey) => {
         emit({ event: "stream_disconnected", streamKey });
-        relayManager?.onStreamDisconnect();
+        relayManager?.onStreamDisconnect(streamKey);
+      },
+      onDebugLog: (source, message) => {
+        if (config.getDebugMode()) {
+          emitDebugLog(source, message);
+        }
       },
     });
 
@@ -97,6 +121,7 @@ function main(): void {
       streamActive: rtmpServer?.hasActiveStream() ?? false,
       relays: relayManager?.getStatuses() ?? [],
       destinations: config.getDestinations(),
+      debugMode: config.getDebugMode(),
     });
   }
 
@@ -141,6 +166,12 @@ function main(): void {
         emitStatus();
         break;
 
+      case "set_debug_mode":
+        config.setDebugMode(cmd.enabled);
+        emitDebugLog("sidecar", `Debug mode ${cmd.enabled ? "enabled" : "disabled"}`);
+        emitStatus();
+        break;
+
       case "shutdown":
         stopServer();
         process.exit(0);
@@ -157,8 +188,9 @@ function main(): void {
     try {
       const cmd: InboundCommand = JSON.parse(line.trim());
       handleCommand(cmd);
-    } catch (err) {
-      console.error("[sidecar] Invalid command:", line);
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err.message : String(err);
+      console.error("[sidecar] Invalid command:", line, error);
       emit({ event: "error", error: `Invalid command: ${line}` });
     }
   });

@@ -3,6 +3,7 @@ import NodeMediaServer from "node-media-server";
 export interface RtmpServerCallbacks {
   onStreamConnect: (streamKey: string) => void;
   onStreamDisconnect: (streamKey: string) => void;
+  onDebugLog?: (source: string, message: string) => void;
 }
 
 export class RtmpServer {
@@ -35,6 +36,10 @@ export class RtmpServer {
 
     this.nms.on("prePublish", (_id: string, streamPath: string) => {
       const key = this.extractStreamKey(streamPath);
+      this.callbacks.onDebugLog?.(
+        "rtmp-server",
+        `Incoming publish: ${JSON.stringify({ streamPath, streamKey: key })}`
+      );
       if (key && !this.activeStreams.has(key)) {
         this.activeStreams.add(key);
         this.callbacks.onStreamConnect(key);
@@ -43,10 +48,18 @@ export class RtmpServer {
 
     this.nms.on("donePublish", (_id: string, streamPath: string) => {
       const key = this.extractStreamKey(streamPath);
+      this.callbacks.onDebugLog?.(
+        "rtmp-server",
+        `Publish ended: ${JSON.stringify({ streamPath, streamKey: key })}`
+      );
       if (key && this.activeStreams.has(key)) {
         this.activeStreams.delete(key);
         this.callbacks.onStreamDisconnect(key);
       }
+    });
+
+    this.nms.on("preConnect", (_id: string, args: Record<string, unknown>) => {
+      this.callbacks.onDebugLog?.("rtmp-server", `Incoming connection: ${JSON.stringify(args)}`);
     });
 
     this.nms.run();

@@ -17,11 +17,23 @@ function PlatformIcon({ platform }: { platform: string }) {
   const labels: Record<string, string> = {
     twitch: "TW",
     youtube: "YT",
+    facebook: "FB",
+    instagram: "IG",
+    tiktok: "TT",
+    trovo: "TR",
+    kick: "KK",
+    restream: "RS",
     custom: "RT",
   };
   const colors: Record<string, string> = {
     twitch: "bg-purple-600",
     youtube: "bg-red-600",
+    facebook: "bg-blue-700",
+    instagram: "bg-pink-600",
+    tiktok: "bg-black",
+    trovo: "bg-green-600",
+    kick: "bg-lime-600",
+    restream: "bg-indigo-600",
     custom: "bg-blue-600",
   };
   return (

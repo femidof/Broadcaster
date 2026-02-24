@@ -49,6 +49,12 @@ export function onSidecarEvent(
   });
 }
 
+export async function setDebugMode(enabled: boolean): Promise<void> {
+  return invoke("send_command", {
+    command: JSON.stringify({ cmd: "set_debug_mode", enabled }),
+  });
+}
+
 export async function checkForUpdates(): Promise<string> {
   try {
     const update = await check();
