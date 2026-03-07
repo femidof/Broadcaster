@@ -324,16 +324,16 @@ class RtmpClient extends EventEmitter {
         streamName: this.info.stream, type: "live",
       });
       this.rtmpSendSetChunkSize();
-      this._connected = true;
-      this.emit("status", { code: "NetStream.Publish.Start" });
+      // Don't emit status here — wait for the server's onStatus acknowledgement
+      // in rtmpHandler(). Emitting prematurely causes data to flow before the
+      // remote server (e.g. Facebook RTMPS) has confirmed the publish.
     } else {
       this.sendInvokeMessage(this.streamId, {
         cmd: "play", transId: 0, cmdObj: null,
         streamName: this.info.stream, start: -2, duration: -1, reset: 1,
       });
       this.rtmpSendSetBufferLength(1000);
-      this._connected = true;
-      this.emit("status", { code: "NetStream.Play.Start" });
+      // Same here — let the server confirm play before signalling readiness.
     }
   }
 
