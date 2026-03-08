@@ -11,6 +11,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SignalStrength } from "@/components/signal-strength";
 import type { AppStatus, RelayStatus } from "@/lib/types";
 
 interface DashboardProps {
@@ -188,6 +189,10 @@ export function Dashboard({
                   <div className="flex items-center gap-3">
                     <RelayStatusBadge status={relay.status} />
                     <span className="text-sm font-medium">{relay.name}</span>
+                    <SignalStrength
+                      bitrateKbps={relay.bitrateKbps}
+                      status={relay.status}
+                    />
                   </div>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     {relay.error && (

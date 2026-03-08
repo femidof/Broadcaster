@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { SignalStrength } from "@/components/signal-strength";
 import type { Destination, RelayStatus } from "@/lib/types";
 
 interface DestinationCardProps {
@@ -76,6 +77,12 @@ export function DestinationCard({
                 {destination.name}
               </span>
               <StatusBadge status={relayStatus} />
+              {relayStatus && (
+                <SignalStrength
+                  bitrateKbps={relayStatus.bitrateKbps}
+                  status={relayStatus.status}
+                />
+              )}
             </div>
             <p className="text-xs text-muted-foreground truncate mt-0.5">
               {destination.url}

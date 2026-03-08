@@ -41,6 +41,24 @@ function main(): void {
 
   let rtmpServer: RtmpServer | null = null;
   let relayManager: RelayManager | null = null;
+  let statsInterval: ReturnType<typeof setInterval> | null = null;
+
+  function startStatsInterval(): void {
+    stopStatsInterval();
+    statsInterval = setInterval(() => {
+      if (relayManager?.isPushing()) {
+        relayManager.updateStats();
+        emit({ event: "relay_stats", relays: relayManager.getStatuses() });
+      }
+    }, 2000);
+  }
+
+  function stopStatsInterval(): void {
+    if (statsInterval) {
+      clearInterval(statsInterval);
+      statsInterval = null;
+    }
+  }
 
   function initRelayManager(): RelayManager {
     const rm = new RelayManager(config.getPort(), {
@@ -162,11 +180,13 @@ function main(): void {
 
       case "push_destinations":
         relayManager?.pushDestinations();
+        startStatsInterval();
         emitStatus();
         break;
 
       case "stop_pushing":
         relayManager?.stopPushing();
+        stopStatsInterval();
         emitStatus();
         break;
 
@@ -181,6 +201,7 @@ function main(): void {
         break;
 
       case "shutdown":
+        stopStatsInterval();
         stopServer();
         process.exit(0);
     }

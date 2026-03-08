@@ -27,6 +27,8 @@ pub struct RelayStatus {
     pub error: Option<String>,
     #[serde(rename = "restartCount")]
     pub restart_count: u32,
+    #[serde(rename = "bitrateKbps")]
+    pub bitrate_kbps: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

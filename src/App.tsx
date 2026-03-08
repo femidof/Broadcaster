@@ -67,7 +67,7 @@ export default function App() {
           ...prev,
           serverRunning: false,
           streamActive: false,
-          relays: prev.relays.map((r) => ({ ...r, status: "idle" as const })),
+          relays: prev.relays.map((r) => ({ ...r, status: "idle" as const, bitrateKbps: 0 })),
         }));
         break;
 
@@ -80,7 +80,7 @@ export default function App() {
           ...prev,
           streamActive: false,
           pushing: false,
-          relays: prev.relays.map((r) => ({ ...r, status: "idle" as const })),
+          relays: prev.relays.map((r) => ({ ...r, status: "idle" as const, bitrateKbps: 0 })),
         }));
         break;
 
@@ -100,7 +100,7 @@ export default function App() {
           ...prev,
           relays: prev.relays.map((r) =>
             r.destinationId === event.destinationId
-              ? { ...r, status: "idle" as const }
+              ? { ...r, status: "idle" as const, bitrateKbps: 0 }
               : r
           ),
         }));
@@ -133,6 +133,20 @@ export default function App() {
         setStatus((prev) => ({
           ...prev,
           destinations: event.destinations,
+        }));
+        break;
+
+      case "relay_stats":
+        setStatus((prev) => ({
+          ...prev,
+          relays: prev.relays.map((r) => {
+            const updated = event.relays.find(
+              (s) => s.destinationId === r.destinationId
+            );
+            return updated
+              ? { ...r, bitrateKbps: updated.bitrateKbps }
+              : r;
+          }),
         }));
         break;
 

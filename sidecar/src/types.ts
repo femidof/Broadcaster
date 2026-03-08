@@ -22,6 +22,7 @@ export interface RelayStatus {
   status: "idle" | "live" | "error";
   error?: string;
   restartCount: number;
+  bitrateKbps: number;
 }
 
 // Inbound commands from Rust via stdin
@@ -59,6 +60,7 @@ export type OutboundEvent =
     }
   | { event: "destinations_updated"; destinations: Destination[] }
   | { event: "debug_log"; source: string; message: string; timestamp: number }
+  | { event: "relay_stats"; relays: RelayStatus[] }
   | { event: "ready" }
   | { event: "error"; error: string };
 
