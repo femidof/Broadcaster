@@ -12,7 +12,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SignalStrength } from "@/components/signal-strength";
+import { BitrateSparkline } from "@/components/analytics/bitrate-sparkline";
 import type { AppStatus, RelayStatus } from "@/lib/types";
+import type { featureFlags } from "@/lib/feature-flags";
+import { getReliabilityFix } from "@/lib/reliability/error-map";
 
 interface DashboardProps {
   status: AppStatus;
@@ -21,6 +24,17 @@ interface DashboardProps {
   onPushDestinations: () => void;
   onStopPushing: () => void;
   onRefresh: () => void;
+  featureFlags: typeof featureFlags;
+  onOpenConnectionDoctor?: (destinationId: string) => void;
+  bitrateSeries?: Record<string, { t: number; kbps: number }[]>;
+  lastSession?: {
+    startTs: number;
+    endTs: number;
+    durationMs: number;
+    perDest: Record<string, { avgKbps: number; maxKbps: number; samples: number }>;
+    restarts: Record<string, number>;
+    errors: Record<string, string | undefined>;
+  } | null;
 }
 
 function RelayStatusBadge({ status }: { status: RelayStatus["status"] }) {
@@ -41,6 +55,10 @@ export function Dashboard({
   onPushDestinations,
   onStopPushing,
   onRefresh,
+  featureFlags,
+  onOpenConnectionDoctor,
+  bitrateSeries,
+  lastSession,
 }: DashboardProps) {
   const enabledDestinations = status.destinations.filter((d) => d.enabled);
   const canGoLive =
@@ -193,13 +211,51 @@ export function Dashboard({
                       bitrateKbps={relay.bitrateKbps}
                       status={relay.status}
                     />
+                    {featureFlags.analytics && bitrateSeries?.[relay.destinationId] ? (
+                      <div className="text-muted-foreground">
+                        <BitrateSparkline points={bitrateSeries[relay.destinationId]} />
+                      </div>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     {relay.error && (
-                      <span className="flex items-center gap-1 text-destructive">
-                        <AlertCircle className="h-3 w-3" />
-                        {relay.error}
-                      </span>
+                      <div className="flex items-start gap-2">
+                        <span className="flex items-center gap-1 text-destructive">
+                          <AlertCircle className="h-3 w-3" />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-destructive wrap-break-word">
+                            {relay.error}
+                          </div>
+                          {featureFlags.reliabilitySuite ? (
+                            (() => {
+                              const dest = status.destinations.find(
+                                (d) => d.id === relay.destinationId
+                              );
+                              if (!dest) return null;
+                              const fix = getReliabilityFix(dest.platform, relay.error);
+                              return (
+                                <div className="mt-1 flex flex-wrap items-center gap-2">
+                                  <span className="text-muted-foreground">
+                                    {fix.title}
+                                  </span>
+                                  {onOpenConnectionDoctor ? (
+                                    <Button
+                                      type="button"
+                                      variant="link"
+                                      size="sm"
+                                      className="h-auto p-0 text-xs"
+                                      onClick={() => onOpenConnectionDoctor(relay.destinationId)}
+                                    >
+                                      Fix it
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              );
+                            })()
+                          ) : null}
+                        </div>
+                      </div>
                     )}
                     {relay.restartCount > 0 && (
                       <span>Restarts: {relay.restartCount}</span>
@@ -211,6 +267,61 @@ export function Dashboard({
           )}
         </CardContent>
       </Card>
+
+      {/* Analytics: last session */}
+      {featureFlags.analytics && lastSession ? (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Session Summary</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="text-sm text-muted-foreground">
+              Duration:{" "}
+              <span className="text-foreground font-medium">
+                {Math.round(lastSession.durationMs / 1000)}s
+              </span>
+            </div>
+            <div className="space-y-2">
+              {Object.entries(lastSession.perDest).length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No samples captured for this session.
+                </p>
+              ) : (
+                Object.entries(lastSession.perDest).map(([destId, s]) => {
+                  const name =
+                    status.destinations.find((d) => d.id === destId)?.name ??
+                    destId;
+                  const restarts = lastSession.restarts[destId] ?? 0;
+                  const err = lastSession.errors[destId];
+                  return (
+                    <div
+                      key={destId}
+                      className="flex items-center justify-between rounded-md border px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate">{name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Avg {s.avgKbps} kbps · Max {s.maxKbps} kbps · Samples {s.samples}
+                        </div>
+                        {err ? (
+                          <div className="text-xs text-destructive truncate">
+                            {err}
+                          </div>
+                        ) : null}
+                      </div>
+                      {restarts > 0 ? (
+                        <Badge variant="warning">Restarts: {restarts}</Badge>
+                      ) : (
+                        <Badge variant="secondary">OK</Badge>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Quick Instructions */}
       <Card>

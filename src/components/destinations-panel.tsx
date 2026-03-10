@@ -14,6 +14,8 @@ import {
 import { DestinationCard } from "@/components/destination-card";
 import type { Destination, RelayStatus } from "@/lib/types";
 import { PLATFORM_PRESETS } from "@/lib/types";
+import type { featureFlags } from "@/lib/feature-flags";
+import { ConnectionDoctor } from "@/components/reliability/connection-doctor";
 
 interface DestinationsPanelProps {
   destinations: Destination[];
@@ -21,6 +23,7 @@ interface DestinationsPanelProps {
   onAdd: (dest: Destination) => void;
   onUpdate: (dest: Destination) => void;
   onRemove: (id: string) => void;
+  featureFlags: typeof featureFlags;
 }
 
 function generateId(): string {
@@ -42,8 +45,10 @@ export function DestinationsPanel({
   onAdd,
   onUpdate,
   onRemove,
+  featureFlags,
 }: DestinationsPanelProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [doctorOpen, setDoctorOpen] = useState(false);
   const [editing, setEditing] = useState<Destination | null>(null);
   const [form, setForm] = useState<Destination>({ ...EMPTY_DESTINATION });
   const selectedPreset =
@@ -140,7 +145,20 @@ export function DestinationsPanel({
 
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="platform">Platform</Label>
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="platform">Platform</Label>
+                {featureFlags.reliabilitySuite ? (
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => setDoctorOpen(true)}
+                  >
+                    Guided setup
+                  </Button>
+                ) : null}
+              </div>
               <Select
                 id="platform"
                 value={form.platform}
@@ -209,6 +227,23 @@ export function DestinationsPanel({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {featureFlags.reliabilitySuite ? (
+        <ConnectionDoctor
+          open={doctorOpen}
+          onOpenChange={setDoctorOpen}
+          platform={form.platform}
+          url={form.url}
+          streamKey={form.streamKey}
+          onApply={(fix) => {
+            setForm((prev) => ({
+              ...prev,
+              url: fix.url ?? prev.url,
+              streamKey: fix.streamKey ?? prev.streamKey,
+            }));
+          }}
+        />
+      ) : null}
     </div>
   );
 }

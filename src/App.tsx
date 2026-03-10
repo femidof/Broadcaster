@@ -6,8 +6,31 @@ import { SettingsPanel } from "@/components/settings-panel";
 import { type DebugLogEntry } from "@/components/debug-panel";
 import type { AppStatus, Destination, SidecarEvent } from "@/lib/types";
 import * as api from "@/lib/tauri";
+import { featureFlags } from "@/lib/feature-flags";
+import { ConnectionDoctor } from "@/components/reliability/connection-doctor";
 
 const MAX_DEBUG_LOGS = 500;
+const MAX_BITRATE_POINTS = 300; // ~10 min at 2s cadence
+
+type BitratePoint = { t: number; kbps: number };
+type BitrateSeries = Record<string, BitratePoint[]>;
+
+type SessionAccum = {
+  startTs: number;
+  perDest: Record<
+    string,
+    { sumKbps: number; count: number; maxKbps: number; lastKbps: number }
+  >;
+};
+
+export type SessionSummary = {
+  startTs: number;
+  endTs: number;
+  durationMs: number;
+  perDest: Record<string, { avgKbps: number; maxKbps: number; samples: number }>;
+  restarts: Record<string, number>;
+  errors: Record<string, string | undefined>;
+};
 
 const DEFAULT_STATUS: AppStatus = {
   serverRunning: false,
@@ -30,6 +53,13 @@ export default function App() {
   const [autoStart, setAutoStart] = useState(true);
   const [debugLogs, setDebugLogs] = useState<DebugLogEntry[]>([]);
   const logIdRef = useRef(0);
+  const [doctorOpen, setDoctorOpen] = useState(false);
+  const [doctorContext, setDoctorContext] = useState<Destination | null>(null);
+  const [bitrateSeries, setBitrateSeries] = useState<BitrateSeries>({});
+  const pushingRef = useRef(false);
+  const sessionRef = useRef<SessionAccum | null>(null);
+  const pushingPrevRef = useRef(false);
+  const [lastSession, setLastSession] = useState<SessionSummary | null>(null);
 
   const pushDebugLog = useCallback(
     (source: string, message: string, level: DebugLogEntry["level"], timestamp?: number) => {
@@ -76,6 +106,7 @@ export default function App() {
         break;
 
       case "stream_disconnected":
+        pushingRef.current = false;
         setStatus((prev) => ({
           ...prev,
           streamActive: false,
@@ -118,6 +149,7 @@ export default function App() {
         break;
 
       case "status":
+        pushingRef.current = event.pushing;
         setStatus({
           serverRunning: event.serverRunning,
           port: event.port,
@@ -148,6 +180,47 @@ export default function App() {
               : r;
           }),
         }));
+        if (featureFlags.analytics) {
+          const now = Date.now();
+
+          if (pushingRef.current) {
+            if (!sessionRef.current) {
+              sessionRef.current = { startTs: now, perDest: {} };
+            }
+            for (const relay of event.relays) {
+              const existing = sessionRef.current.perDest[relay.destinationId] ?? {
+                sumKbps: 0,
+                count: 0,
+                maxKbps: 0,
+                lastKbps: 0,
+              };
+              const nextCount = existing.count + 1;
+              const nextSum = existing.sumKbps + relay.bitrateKbps;
+              const nextMax = Math.max(existing.maxKbps, relay.bitrateKbps);
+              sessionRef.current.perDest[relay.destinationId] = {
+                sumKbps: nextSum,
+                count: nextCount,
+                maxKbps: nextMax,
+                lastKbps: relay.bitrateKbps,
+              };
+            }
+          }
+
+          setBitrateSeries((prev) => {
+            const next: BitrateSeries = { ...prev };
+            for (const relay of event.relays) {
+              const points = next[relay.destinationId]
+                ? [...next[relay.destinationId]]
+                : [];
+              points.push({ t: now, kbps: relay.bitrateKbps });
+              next[relay.destinationId] =
+                points.length > MAX_BITRATE_POINTS
+                  ? points.slice(points.length - MAX_BITRATE_POINTS)
+                  : points;
+            }
+            return next;
+          });
+        }
         break;
 
       case "debug_log":
@@ -180,6 +253,54 @@ export default function App() {
       unlistenPromise.then((unlisten) => unlisten());
     };
   }, [handleSidecarEvent]);
+
+  useEffect(() => {
+    const prev = pushingPrevRef.current;
+    const next = status.pushing;
+
+    if (!prev && next) {
+      sessionRef.current = { startTs: Date.now(), perDest: {} };
+    } else if (prev && !next) {
+      const endTs = Date.now();
+      const session = sessionRef.current;
+      if (featureFlags.analytics && session) {
+        const perDest: SessionSummary["perDest"] = {};
+        for (const [destId, acc] of Object.entries(session.perDest)) {
+          perDest[destId] = {
+            avgKbps: acc.count ? Math.round(acc.sumKbps / acc.count) : 0,
+            maxKbps: acc.maxKbps,
+            samples: acc.count,
+          };
+        }
+
+        const restarts: SessionSummary["restarts"] = {};
+        const errors: SessionSummary["errors"] = {};
+        for (const r of status.relays) {
+          restarts[r.destinationId] = r.restartCount;
+          errors[r.destinationId] = r.error;
+        }
+
+        setLastSession({
+          startTs: session.startTs,
+          endTs,
+          durationMs: Math.max(0, endTs - session.startTs),
+          perDest,
+          restarts,
+          errors,
+        });
+      }
+      sessionRef.current = null;
+    }
+
+    pushingPrevRef.current = next;
+  }, [status.pushing, status.relays]);
+
+  function openDoctorForDestination(destinationId: string) {
+    const dest = status.destinations.find((d) => d.id === destinationId);
+    if (!dest) return;
+    setDoctorContext(dest);
+    setDoctorOpen(true);
+  }
 
   async function handleStartServer() {
     try {
@@ -284,43 +405,62 @@ export default function App() {
   }
 
   return (
-    <Layout
-      activeTab={activeTab}
-      onTabChange={setActiveTab}
-      debugMode={status.debugMode}
-      debugLogs={debugLogs}
-      onClearDebugLogs={() => setDebugLogs([])}
-    >
-      {activeTab === "dashboard" && (
-        <Dashboard
-          status={status}
-          onStartServer={handleStartServer}
-          onStopServer={handleStopServer}
-          onPushDestinations={handlePushDestinations}
-          onStopPushing={handleStopPushing}
-          onRefresh={() => api.getStatus().catch(console.error)}
+    <>
+      <Layout
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        debugMode={status.debugMode}
+        debugLogs={debugLogs}
+        onClearDebugLogs={() => setDebugLogs([])}
+      >
+        {activeTab === "dashboard" && (
+          <Dashboard
+            status={status}
+            onStartServer={handleStartServer}
+            onStopServer={handleStopServer}
+            onPushDestinations={handlePushDestinations}
+            onStopPushing={handleStopPushing}
+            onRefresh={() => api.getStatus().catch(console.error)}
+            featureFlags={featureFlags}
+            onOpenConnectionDoctor={
+              featureFlags.reliabilitySuite ? openDoctorForDestination : undefined
+            }
+            bitrateSeries={featureFlags.analytics ? bitrateSeries : undefined}
+            lastSession={featureFlags.analytics ? lastSession : undefined}
+          />
+        )}
+        {activeTab === "destinations" && (
+          <DestinationsPanel
+            destinations={status.destinations}
+            relays={status.relays}
+            onAdd={handleAddDestination}
+            onUpdate={handleUpdateDestination}
+            onRemove={handleRemoveDestination}
+            featureFlags={featureFlags}
+          />
+        )}
+        {activeTab === "settings" && (
+          <SettingsPanel
+            port={status.port}
+            autoStart={autoStart}
+            debugMode={status.debugMode}
+            onPortChange={handlePortChange}
+            onAutoStartChange={setAutoStart}
+            onDebugModeChange={handleDebugModeChange}
+            onCheckUpdates={handleCheckUpdates}
+          />
+        )}
+      </Layout>
+
+      {featureFlags.reliabilitySuite && doctorContext ? (
+        <ConnectionDoctor
+          open={doctorOpen}
+          onOpenChange={setDoctorOpen}
+          platform={doctorContext.platform}
+          url={doctorContext.url}
+          streamKey={doctorContext.streamKey}
         />
-      )}
-      {activeTab === "destinations" && (
-        <DestinationsPanel
-          destinations={status.destinations}
-          relays={status.relays}
-          onAdd={handleAddDestination}
-          onUpdate={handleUpdateDestination}
-          onRemove={handleRemoveDestination}
-        />
-      )}
-      {activeTab === "settings" && (
-        <SettingsPanel
-          port={status.port}
-          autoStart={autoStart}
-          debugMode={status.debugMode}
-          onPortChange={handlePortChange}
-          onAutoStartChange={setAutoStart}
-          onDebugModeChange={handleDebugModeChange}
-          onCheckUpdates={handleCheckUpdates}
-        />
-      )}
-    </Layout>
+      ) : null}
+    </>
   );
 }

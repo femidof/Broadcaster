@@ -153,6 +153,19 @@ To enable auto-updates from GitHub Releases:
 
 4. Set `TAURI_SIGNING_PRIVATE_KEY` when building releases
 
+## Feature flags (build-time)
+
+Broadcaster supports build-time feature flags via Vite env variables. These are **compiled into the frontend at build time** and default to **OFF** unless explicitly enabled.
+
+- `VITE_FEATURE_RELIABILITY_SUITE=1`: Enables Reliability Suite UI (Connection Doctor + error-to-fix actions)
+- `VITE_FEATURE_ANALYTICS=1`: Enables Analytics UI (bitrate sparklines + session summary)
+
+Example:
+
+```bash
+VITE_FEATURE_RELIABILITY_SUITE=1 VITE_FEATURE_ANALYTICS=1 npm run build:release
+```
+
 ## License
 
 MIT
