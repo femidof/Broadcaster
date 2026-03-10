@@ -20,7 +20,7 @@ OBS → localhost:1935 → Broadcaster → Twitch
 
 1. Broadcaster runs a local RTMP server on port 1935
 2. OBS connects once to `rtmp://localhost:1935/live`
-3. Broadcaster relays the stream to all enabled destinations via FFmpeg
+3. Broadcaster relays the stream to all enabled destinations via a built-in RTMP relay client (no FFmpeg required for relaying)
 
 ## Prerequisites
 
@@ -112,13 +112,16 @@ Notes:
 ```
 React Frontend ←→ Tauri Rust Core ←→ Node Sidecar (stdin/stdout JSON)
                                           ├── node-media-server (RTMP ingest)
-                                          └── FFmpeg processes (relay to destinations)
+                                          └── custom RTMP relay client (push to destinations)
 ```
 
 - **Frontend**: React + Tailwind CSS, communicates with Rust via `invoke()`
 - **Rust Core**: Manages sidecar lifecycle, relays events to frontend
-- **Node Sidecar**: Compiled to standalone binary via `pkg`, handles RTMP and FFmpeg
+- **Node Sidecar**: Compiled to standalone binary via `pkg`, handles RTMP ingest and relaying
 - **Communication**: JSON lines over stdin/stdout between Rust and Node
+
+Notes:
+- FFmpeg is bundled for compatibility/tooling, but the current relay mechanism uses a custom RTMP client implementation.
 
 ## Debug Mode (Release Builds)
 
