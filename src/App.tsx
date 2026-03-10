@@ -111,7 +111,7 @@ export default function App() {
           ...prev,
           relays: prev.relays.map((r) =>
             r.destinationId === event.destinationId
-              ? { ...r, status: "error" as const, error: event.error }
+              ? { ...r, status: "error" as const, error: event.error, bitrateKbps: 0 }
               : r
           ),
         }));
