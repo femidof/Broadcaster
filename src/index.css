@@ -35,3 +35,9 @@ body {
   color: var(--color-foreground);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
+
+/* Windows-native <select> dropdowns may ignore dark theming; force readable option colors. */
+select option {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}
