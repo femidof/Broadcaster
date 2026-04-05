@@ -13,12 +13,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SignalStrength } from "@/components/signal-strength";
 import { BitrateSparkline } from "@/components/analytics/bitrate-sparkline";
-import type { AppStatus, RelayStatus } from "@/lib/types";
+import type { DashboardStatus, RelayStatus } from "@/lib/types";
 import type { featureFlags } from "@/lib/feature-flags";
 import { getReliabilityFix } from "@/lib/reliability/error-map";
 
 interface DashboardProps {
-  status: AppStatus;
+  status: DashboardStatus;
   onStartServer: () => void;
   onStopServer: () => void;
   onPushDestinations: () => void;

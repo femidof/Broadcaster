@@ -19,6 +19,16 @@ pub struct Destination {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Profile {
+    pub id: String,
+    pub name: String,
+    pub port: u16,
+    pub auto_start: bool,
+    pub destinations: Vec<Destination>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayStatus {
     #[serde(rename = "destinationId")]
     pub destination_id: String,
@@ -400,7 +410,7 @@ pub async fn spawn_sidecar(app: &AppHandle) -> Result<(), String> {
 
                     let _ = app_handle.emit(
                         "sidecar-event",
-                        serde_json::json!({"event": "server_stopped"}),
+                        serde_json::json!({"event": "all_servers_stopped"}),
                     );
                     break;
                 }

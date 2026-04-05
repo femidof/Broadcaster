@@ -7,27 +7,22 @@
   </table>
 </div>
 
-A lightweight desktop multistream relay app. Stream to Twitch, YouTube, Facebook Live, Instagram Live, TikTok Live, Trovo, Kick, Restream, and custom RTMP destinations simultaneously from a single OBS connection.
+A lightweight desktop multistream relay app. Stream to Twitch, YouTube, Facebook Live, Instagram Live, TikTok Live, Trovo, Kick, Restream, BIGO LIVE, and custom RTMP destinations simultaneously. **Version 2** adds **profiles**: multiple named setups, each with its own local RTMP port and destination list, so you can run several ingest servers at once (for example backup or split distribution).
 
 Built with **Tauri v2** (Rust) + **React** + **Node.js sidecar**.
+
+**Why this stack?** [Overview of the framework and technology choices](https://claude.ai/share/7fb1e97b-d256-4aed-83a1-bfcf52cab5d2).
 
 ## How It Works
 
 ```
-OBS → localhost:1935 → Broadcaster → Twitch
-                                   → YouTube
-                                   → Facebook Live
-                                   → Instagram Live
-                                   → TikTok Live
-                                   → Trovo
-                                   → Kick
-                                   → Restream
-                                   → Custom RTMP
+OBS → localhost:<port> (per profile) → Broadcaster → Twitch / YouTube / …
 ```
 
-1. Broadcaster runs a local RTMP server on port 1935
-2. OBS connects once to `rtmp://localhost:1935/live`
-3. Broadcaster relays the stream to all enabled destinations via a built-in RTMP relay client (no FFmpeg required for relaying)
+1. Pick a **profile** (each profile has its own RTMP port, default **1935** for the first profile).
+2. Start that profile’s RTMP server (or enable **auto-start** for it in Settings).
+3. Point OBS at `rtmp://localhost:<port>/live` with your chosen stream key.
+4. Broadcaster relays to all **enabled destinations on that profile** via a built-in RTMP relay client (no FFmpeg required for relaying).
 
 ## Prerequisites
 
@@ -79,11 +74,12 @@ Outputs:
 
 ## OBS Configuration
 
-1. Open OBS → Settings → Stream
-2. Set Service to **Custom**
-3. Server: `rtmp://localhost:1935/live`
-4. Stream Key: `stream` (or any non-empty key)
-5. Click **Start Streaming**
+1. Select the profile you want in the app (each profile has its own port; check **Settings** for the current port).
+2. Open OBS → Settings → Stream
+3. Set Service to **Custom**
+4. Server: `rtmp://localhost:<profile-port>/live`
+5. Stream Key: `stream` (or any non-empty key)
+6. Click **Start Streaming**
 
 Notes:
 - Broadcaster starts relaying from the exact stream key OBS publishes (for example, `/live/stream` or `/live/myKey`).
@@ -106,7 +102,7 @@ Notes:
 │   ├── src/
 │   │   ├── index.ts        # Entry point, stdin/stdout IPC
 │   │   ├── rtmp-server.ts  # node-media-server wrapper
-│   │   ├── relay-manager.ts# FFmpeg process manager
+│   │   ├── relay-manager.ts    # Per-profile RTMP relay lifecycle
 │   │   └── config-store.ts # JSON config persistence
 │   └── build.mjs           # Build script (tsc + pkg)
 └── scripts/
@@ -173,6 +169,10 @@ Example:
 VITE_FEATURE_RELIABILITY_SUITE=1 VITE_FEATURE_ANALYTICS=1 npm run build:release
 ```
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Changes are tracked in [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
-MIT
+[GNU Affero General Public License v3.0 only](LICENSE) (AGPL-3.0-only).

@@ -6,7 +6,12 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores([
+    'dist',
+    'sidecar/dist',
+    'src-tauri/target',
+    '**/node_modules/**',
+  ]),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -18,6 +23,18 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+    },
+  },
+  {
+    files: ['src/components/ui/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
+  {
+    files: ['sidecar/src/**/*.d.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
     },
   },
 ])
