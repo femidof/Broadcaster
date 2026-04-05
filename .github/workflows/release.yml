@@ -78,6 +78,9 @@ jobs:
           releaseBody: 'See the assets for download links.'
           releaseDraft: true
           prerelease: false
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+          retryAttempts: 5
 
   publish-release:
     needs: build

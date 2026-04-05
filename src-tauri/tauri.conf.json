@@ -50,8 +50,10 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
-      "endpoints": []
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhEMTcxM0M3REY5MjhGMjIKUldRaWo1TGZ4eE1YamM1Mng5Mkcrc2M2Y0d0cFJVMmtpUUc3bjc0ZzArQ0Ixd2pNSmhSYzFhajAK",
+      "endpoints": [
+        "https://github.com/femidof/Broadcaster/releases/latest/download/latest.json"
+      ]
     }
   }
 }
