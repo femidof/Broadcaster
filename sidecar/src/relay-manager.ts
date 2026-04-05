@@ -9,6 +9,7 @@ interface RelayProcess {
   restartCount: number;
   restartTimer: ReturnType<typeof setTimeout> | null;
   stopped: boolean;
+  bitrateKbps: number;
 }
 
 export interface RelayManagerCallbacks {
@@ -111,6 +112,7 @@ export class RelayManager {
       restartCount: 0,
       restartTimer: null,
       stopped: false,
+      bitrateKbps: 0,
     };
     this.relays.set(dest.id, relay);
   }
@@ -156,6 +158,15 @@ export class RelayManager {
     }
   }
 
+  /** Snapshot bitrate stats from active relays. Call this on a periodic timer. */
+  updateStats(): void {
+    for (const [, relay] of this.relays) {
+      if (relay.relay) {
+        relay.bitrateKbps = relay.relay.getStats().bitrateKbps;
+      }
+    }
+  }
+
   getStatuses(): RelayStatus[] {
     const statuses: RelayStatus[] = [];
     for (const [, relay] of this.relays) {
@@ -165,6 +176,7 @@ export class RelayManager {
         status: relay.status,
         error: relay.error,
         restartCount: relay.restartCount,
+        bitrateKbps: relay.bitrateKbps,
       });
     }
     return statuses;
@@ -207,6 +219,7 @@ export class RelayManager {
         },
         onStopped: (reason) => {
           relay.relay = null;
+          relay.bitrateKbps = 0;
           if (relay.stopped) {
             relay.status = "idle";
             return;
@@ -224,6 +237,7 @@ export class RelayManager {
         },
         onError: (error) => {
           relay.relay = null;
+          relay.bitrateKbps = 0;
           relay.status = "error";
           relay.error = error;
           this.callbacks.onRelayError(relay.destination.id, error);
@@ -261,6 +275,7 @@ export class RelayManager {
     if (relay.relay) {
       const directRelay = relay.relay;
       relay.relay = null;
+      relay.bitrateKbps = 0;
       try {
         directRelay.stop();
       } catch {

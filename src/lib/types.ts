@@ -22,6 +22,7 @@ export interface RelayStatus {
   status: "idle" | "live" | "error";
   error?: string;
   restartCount: number;
+  bitrateKbps: number;
 }
 
 export interface AppStatus {
@@ -56,6 +57,7 @@ export type SidecarEvent =
     }
   | { event: "destinations_updated"; destinations: Destination[] }
   | { event: "debug_log"; source: string; message: string; timestamp: number }
+  | { event: "relay_stats"; relays: RelayStatus[] }
   | { event: "sidecar_error"; error: string }
   | { event: "error"; error: string };
 

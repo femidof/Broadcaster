@@ -666,6 +666,10 @@ class RtmpClient extends EventEmitter {
   }
 }
 
+export interface RelayStats {
+  bitrateKbps: number;
+}
+
 export interface DirectRelayCallbacks {
   onStarted: () => void;
   onStopped: (reason: string) => void;
@@ -681,6 +685,9 @@ export class DirectRelay {
   private outputUrl: string;
   private name: string;
   private callbacks: DirectRelayCallbacks;
+  private bytesSent = 0;
+  private lastStatBytes = 0;
+  private lastStatTime = Date.now();
 
   constructor(
     inputUrl: string,
@@ -737,15 +744,24 @@ export class DirectRelay {
     });
 
     this.pullClient.on("audio", (data: Buffer, timestamp: number) => {
-      this.pushClient?.pushAudio(data, timestamp);
+      if (this.pushClient) {
+        this.pushClient.pushAudio(data, timestamp);
+        this.bytesSent += data.length;
+      }
     });
 
     this.pullClient.on("video", (data: Buffer, timestamp: number) => {
-      this.pushClient?.pushVideo(data, timestamp);
+      if (this.pushClient) {
+        this.pushClient.pushVideo(data, timestamp);
+        this.bytesSent += data.length;
+      }
     });
 
     this.pullClient.on("script", (data: Buffer, timestamp: number) => {
-      this.pushClient?.pushScript(data, timestamp);
+      if (this.pushClient) {
+        this.pushClient.pushScript(data, timestamp);
+        this.bytesSent += data.length;
+      }
     });
 
     this.pullClient.on("error", (err: Error) => {
@@ -773,6 +789,16 @@ export class DirectRelay {
     if (!this.running) return;
     this.running = false;
     this.cleanup();
+  }
+
+  getStats(): RelayStats {
+    const now = Date.now();
+    const elapsed = (now - this.lastStatTime) / 1000;
+    const bytes = this.bytesSent - this.lastStatBytes;
+    const bitrateKbps = elapsed > 0 ? Math.round((bytes * 8) / elapsed / 1000) : 0;
+    this.lastStatBytes = this.bytesSent;
+    this.lastStatTime = now;
+    return { bitrateKbps };
   }
 
   private cleanup(): void {

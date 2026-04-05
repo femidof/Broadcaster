@@ -122,7 +122,7 @@ export function SettingsPanel({
             <p>
               <strong className="text-foreground">How it works:</strong>{" "}
               Broadcaster receives your stream locally and re-broadcasts it to
-              all enabled destinations simultaneously using FFmpeg.
+              all enabled destinations simultaneously using a built-in RTMP relay client.
             </p>
           </div>
         </CardContent>

@@ -1,6 +1,6 @@
 [package]
 name = "broadcaster"
-version = "0.1.0"
+version = "1.0.0"
 description = "Multistream relay desktop app"
 authors = ["you"]
 license = "MIT"
