@@ -143,18 +143,7 @@ This surfaces errors that would otherwise only appear in system logs, making it 
 
 ## Updater
 
-To enable auto-updates from GitHub Releases:
-
-1. Generate signing keys:
-   ```bash
-   npm run tauri signer generate -- -w ~/.tauri/broadcaster.key
-   ```
-
-2. Add the public key to `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`
-
-3. Add your GitHub release endpoint to `plugins.updater.endpoints`
-
-4. Set `TAURI_SIGNING_PRIVATE_KEY` when building releases
+The app can check for updates when Tauri’s updater is configured (public key, endpoints, and signed release artifacts). That setup is optional for local builds and is documented for **maintainers only** in `RELEASE_SIGNING.local.md`, which is gitignored and not part of the published repository—copy or recreate that file on machines used for releases.
 
 ## Feature flags (build-time)
 
