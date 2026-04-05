@@ -1,4 +1,11 @@
-# Broadcaster
+<div align="center">
+  <table>
+    <tr>
+      <td valign="middle"><img src="./src-tauri/icons/128x128.png" alt="" width="56" height="56" /></td>
+      <td valign="middle"><h1>Broadcaster</h1></td>
+    </tr>
+  </table>
+</div>
 
 A lightweight desktop multistream relay app. Stream to Twitch, YouTube, Facebook Live, Instagram Live, TikTok Live, Trovo, Kick, Restream, and custom RTMP destinations simultaneously from a single OBS connection.
 
