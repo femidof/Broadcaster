@@ -29,3 +29,6 @@ Thumbs.db
 
 # Tauri signing keys
 *.key
+
+# Maintainer-only release signing notes (not committed)
+RELEASE_SIGNING.local.md

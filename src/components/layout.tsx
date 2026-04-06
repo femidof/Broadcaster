@@ -14,6 +14,7 @@ interface LayoutProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
   children: React.ReactNode;
+  profileBar?: React.ReactNode;
   debugMode?: boolean;
   debugLogs?: DebugLogEntry[];
   onClearDebugLogs?: () => void;
@@ -23,6 +24,7 @@ export function Layout({
   activeTab,
   onTabChange,
   children,
+  profileBar,
   debugMode = false,
   debugLogs = [],
   onClearDebugLogs,
@@ -37,9 +39,11 @@ export function Layout({
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+        {profileBar}
+        <div className="flex flex-1 overflow-hidden min-h-0">
         {/* Sidebar Nav */}
-        <nav className="flex w-48 flex-col border-r p-2">
+        <nav className="flex w-48 flex-col border-r p-2 shrink-0">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             return (
@@ -61,7 +65,7 @@ export function Layout({
         </nav>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-6 min-w-0">
           {children}
           {debugMode && (
             <div className="mt-6">
@@ -69,6 +73,7 @@ export function Layout({
             </div>
           )}
         </main>
+        </div>
       </div>
     </div>
   );

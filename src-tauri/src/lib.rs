@@ -1,6 +1,6 @@
 mod sidecar;
 
-use sidecar::{Destination, SidecarState};
+use sidecar::{Destination, Profile, SidecarState};
 use tauri::{Emitter, Manager};
 
 async fn ensure_sidecar_and_send(app: &tauri::AppHandle, command: String) -> Result<(), String> {
@@ -24,61 +24,102 @@ async fn send_command(app: tauri::AppHandle, command: String) -> Result<(), Stri
 }
 
 #[tauri::command]
-async fn add_destination(app: tauri::AppHandle, destination: Destination) -> Result<(), String> {
+async fn create_profile(app: tauri::AppHandle, profile: Profile) -> Result<(), String> {
+    let cmd = serde_json::json!({
+        "cmd": "create_profile",
+        "profile": profile,
+    });
+    ensure_sidecar_and_send(&app, cmd.to_string()).await
+}
+
+#[tauri::command]
+async fn update_profile(app: tauri::AppHandle, profile: Profile) -> Result<(), String> {
+    let cmd = serde_json::json!({
+        "cmd": "update_profile",
+        "profile": profile,
+    });
+    ensure_sidecar_and_send(&app, cmd.to_string()).await
+}
+
+#[tauri::command]
+async fn delete_profile(app: tauri::AppHandle, profile_id: String) -> Result<(), String> {
+    let cmd = serde_json::json!({
+        "cmd": "delete_profile",
+        "profileId": profile_id,
+    });
+    ensure_sidecar_and_send(&app, cmd.to_string()).await
+}
+
+#[tauri::command]
+async fn add_destination(
+    app: tauri::AppHandle,
+    profile_id: String,
+    destination: Destination,
+) -> Result<(), String> {
     let cmd = serde_json::json!({
         "cmd": "add_destination",
+        "profileId": profile_id,
         "destination": destination,
     });
     ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
 
 #[tauri::command]
-async fn update_destination(app: tauri::AppHandle, destination: Destination) -> Result<(), String> {
+async fn update_destination(
+    app: tauri::AppHandle,
+    profile_id: String,
+    destination: Destination,
+) -> Result<(), String> {
     let cmd = serde_json::json!({
         "cmd": "update_destination",
+        "profileId": profile_id,
         "destination": destination,
     });
     ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
 
 #[tauri::command]
-async fn remove_destination(app: tauri::AppHandle, id: String) -> Result<(), String> {
+async fn remove_destination(app: tauri::AppHandle, profile_id: String, id: String) -> Result<(), String> {
     let cmd = serde_json::json!({
         "cmd": "remove_destination",
+        "profileId": profile_id,
         "id": id,
     });
     ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
 
 #[tauri::command]
-async fn push_destinations(app: tauri::AppHandle) -> Result<(), String> {
+async fn push_destinations(app: tauri::AppHandle, profile_id: String) -> Result<(), String> {
     let cmd = serde_json::json!({
         "cmd": "push_destinations",
+        "profileId": profile_id,
     });
     ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
 
 #[tauri::command]
-async fn stop_pushing(app: tauri::AppHandle) -> Result<(), String> {
+async fn stop_pushing(app: tauri::AppHandle, profile_id: String) -> Result<(), String> {
     let cmd = serde_json::json!({
         "cmd": "stop_pushing",
+        "profileId": profile_id,
     });
     ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
 
 #[tauri::command]
-async fn start_server(app: tauri::AppHandle, port: u16) -> Result<(), String> {
+async fn start_server(app: tauri::AppHandle, profile_id: String) -> Result<(), String> {
     let cmd = serde_json::json!({
         "cmd": "start_server",
-        "port": port,
+        "profileId": profile_id,
     });
     ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
 
 #[tauri::command]
-async fn stop_server(app: tauri::AppHandle) -> Result<(), String> {
+async fn stop_server(app: tauri::AppHandle, profile_id: String) -> Result<(), String> {
     let cmd = serde_json::json!({
         "cmd": "stop_server",
+        "profileId": profile_id,
     });
     ensure_sidecar_and_send(&app, cmd.to_string()).await
 }
@@ -129,6 +170,9 @@ pub fn run() {
             start_sidecar,
             stop_sidecar,
             send_command,
+            create_profile,
+            update_profile,
+            delete_profile,
             add_destination,
             update_destination,
             remove_destination,

@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Opt into Node 24 for JS actions (tauri-action may still ship on Node 20 until upstream updates).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: write
 
@@ -18,7 +22,7 @@ jobs:
           - platform: macos-latest
             target: aarch64-apple-darwin
             pkg_target: node22-macos-arm64
-          - platform: macos-13
+          - platform: macos-15-intel
             target: x86_64-apple-darwin
             pkg_target: node22-macos-x64
           - platform: windows-latest
@@ -27,15 +31,18 @@ jobs:
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             pkg_target: node22-linux-x64
+          - platform: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            pkg_target: node22-linux-arm64
 
     runs-on: ${{ matrix.platform }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
 
@@ -43,7 +50,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: startsWith(matrix.platform, 'ubuntu-')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -78,6 +85,9 @@ jobs:
           releaseBody: 'See the assets for download links.'
           releaseDraft: true
           prerelease: false
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+          retryAttempts: 5
 
   publish-release:
     needs: build
@@ -86,14 +96,16 @@ jobs:
 
     steps:
       - name: Publish release
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
-            const { data: releases } = await github.rest.repos.listReleases({
+            const tag = context.ref.replace('refs/tags/', '');
+            const releases = await github.paginate(github.rest.repos.listReleases, {
               owner: context.repo.owner,
               repo: context.repo.repo,
+              per_page: 100,
             });
-            const draft = releases.find(r => r.draft && r.tag_name === context.ref.replace('refs/tags/', ''));
+            const draft = releases.find((r) => r.draft && r.tag_name === tag);
             if (draft) {
               await github.rest.repos.updateRelease({
                 owner: context.repo.owner,
@@ -101,4 +113,6 @@ jobs:
                 release_id: draft.id,
                 draft: false,
               });
+            } else {
+              console.log(`::warning::No draft release found for tag ${tag}; skipping publish (check tag name and draft state).`);
             }

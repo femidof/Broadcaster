@@ -10,6 +10,7 @@ export interface Destination {
     | "trovo"
     | "kick"
     | "restream"
+    | "bigo"
     | "custom";
   url: string;
   streamKey: string;
@@ -25,39 +26,56 @@ export interface RelayStatus {
   bitrateKbps: number;
 }
 
-export interface AppStatus {
-  serverRunning: boolean;
+export interface Profile {
+  id: string;
+  name: string;
   port: number;
+  autoStart: boolean;
+  destinations: Destination[];
+}
+
+export interface ProfileStatus {
+  profileId: string;
+  profileName: string;
+  port: number;
+  autoStart: boolean;
+  serverRunning: boolean;
   streamActive: boolean;
   pushing: boolean;
   relays: RelayStatus[];
   destinations: Destination[];
+}
+
+/** Full app state from the sidecar (all profiles + global debug). */
+export interface AppStatus {
+  profiles: ProfileStatus[];
   debugMode: boolean;
 }
 
 export type SidecarEvent =
   | { event: "ready" }
-  | { event: "server_started"; port: number }
-  | { event: "server_stopped" }
-  | { event: "server_error"; error: string }
-  | { event: "stream_connected"; streamKey: string }
-  | { event: "stream_disconnected"; streamKey: string }
-  | { event: "relay_started"; destinationId: string }
-  | { event: "relay_stopped"; destinationId: string; reason: string }
-  | { event: "relay_error"; destinationId: string; error: string }
+  | { event: "server_started"; profileId: string; port: number }
+  | { event: "server_stopped"; profileId: string }
+  | { event: "all_servers_stopped" }
+  | { event: "server_error"; profileId: string; error: string }
+  | { event: "stream_connected"; profileId: string; streamKey: string }
+  | { event: "stream_disconnected"; profileId: string; streamKey: string }
+  | { event: "relay_started"; profileId: string; destinationId: string }
+  | {
+      event: "relay_stopped";
+      profileId: string;
+      destinationId: string;
+      reason: string;
+    }
+  | { event: "relay_error"; profileId: string; destinationId: string; error: string }
   | {
       event: "status";
-      serverRunning: boolean;
-      port: number;
-      streamActive: boolean;
-      pushing: boolean;
-      relays: RelayStatus[];
-      destinations: Destination[];
+      profiles: ProfileStatus[];
       debugMode: boolean;
     }
-  | { event: "destinations_updated"; destinations: Destination[] }
+  | { event: "destinations_updated"; profileId: string; destinations: Destination[] }
   | { event: "debug_log"; source: string; message: string; timestamp: number }
-  | { event: "relay_stats"; relays: RelayStatus[] }
+  | { event: "relay_stats"; profileId: string; relays: RelayStatus[] }
   | { event: "sidecar_error"; error: string }
   | { event: "error"; error: string };
 
@@ -107,4 +125,20 @@ export const PLATFORM_PRESETS: Record<
     url: "rtmp://live.restream.io/live/",
     label: "Restream",
   },
+  bigo: {
+    url: "rtmp://",
+    label: "BIGO LIVE",
+    urlHint: "Paste the RTMP URL from BIGO LIVE stream settings.",
+  },
 };
+
+/** Dashboard-style view of one profile (subset of ProfileStatus fields used by UI). */
+export type DashboardStatus = Pick<
+  ProfileStatus,
+  | "serverRunning"
+  | "port"
+  | "streamActive"
+  | "pushing"
+  | "relays"
+  | "destinations"
+>;

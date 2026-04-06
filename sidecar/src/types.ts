@@ -10,6 +10,7 @@ export interface Destination {
     | "trovo"
     | "kick"
     | "restream"
+    | "bigo"
     | "custom";
   url: string;
   streamKey: string;
@@ -25,48 +26,70 @@ export interface RelayStatus {
   bitrateKbps: number;
 }
 
+export interface Profile {
+  id: string;
+  name: string;
+  port: number;
+  autoStart: boolean;
+  destinations: Destination[];
+}
+
+export interface ProfileStatus {
+  profileId: string;
+  profileName: string;
+  port: number;
+  autoStart: boolean;
+  serverRunning: boolean;
+  streamActive: boolean;
+  pushing: boolean;
+  relays: RelayStatus[];
+  destinations: Destination[];
+}
+
 // Inbound commands from Rust via stdin
 export type InboundCommand =
-  | { cmd: "start_server"; port: number }
-  | { cmd: "stop_server" }
-  | { cmd: "add_destination"; destination: Destination }
-  | { cmd: "remove_destination"; id: string }
-  | { cmd: "update_destination"; destination: Destination }
-  | { cmd: "push_destinations" }
-  | { cmd: "stop_pushing" }
+  | { cmd: "create_profile"; profile: Profile }
+  | { cmd: "update_profile"; profile: Profile }
+  | { cmd: "delete_profile"; profileId: string }
+  | { cmd: "start_server"; profileId: string }
+  | { cmd: "stop_server"; profileId: string }
+  | { cmd: "add_destination"; profileId: string; destination: Destination }
+  | { cmd: "remove_destination"; profileId: string; id: string }
+  | { cmd: "update_destination"; profileId: string; destination: Destination }
+  | { cmd: "push_destinations"; profileId: string }
+  | { cmd: "stop_pushing"; profileId: string }
   | { cmd: "get_status" }
   | { cmd: "set_debug_mode"; enabled: boolean }
   | { cmd: "shutdown" };
 
 // Outbound events to Rust via stdout
 export type OutboundEvent =
-  | { event: "server_started"; port: number }
-  | { event: "server_stopped" }
-  | { event: "server_error"; error: string }
-  | { event: "stream_connected"; streamKey: string }
-  | { event: "stream_disconnected"; streamKey: string }
-  | { event: "relay_started"; destinationId: string }
-  | { event: "relay_stopped"; destinationId: string; reason: string }
-  | { event: "relay_error"; destinationId: string; error: string }
+  | { event: "server_started"; profileId: string; port: number }
+  | { event: "server_stopped"; profileId: string }
+  | { event: "server_error"; profileId: string; error: string }
+  | { event: "stream_connected"; profileId: string; streamKey: string }
+  | { event: "stream_disconnected"; profileId: string; streamKey: string }
+  | { event: "relay_started"; profileId: string; destinationId: string }
+  | {
+      event: "relay_stopped";
+      profileId: string;
+      destinationId: string;
+      reason: string;
+    }
+  | { event: "relay_error"; profileId: string; destinationId: string; error: string }
   | {
       event: "status";
-      serverRunning: boolean;
-      port: number;
-      streamActive: boolean;
-      pushing: boolean;
-      relays: RelayStatus[];
-      destinations: Destination[];
+      profiles: ProfileStatus[];
       debugMode: boolean;
     }
-  | { event: "destinations_updated"; destinations: Destination[] }
+  | { event: "destinations_updated"; profileId: string; destinations: Destination[] }
   | { event: "debug_log"; source: string; message: string; timestamp: number }
-  | { event: "relay_stats"; relays: RelayStatus[] }
+  | { event: "relay_stats"; profileId: string; relays: RelayStatus[] }
   | { event: "ready" }
-  | { event: "error"; error: string };
+  | { event: "error"; error: string }
+  | { event: "all_servers_stopped" };
 
 export interface AppConfig {
-  port: number;
-  autoStart: boolean;
   debugMode: boolean;
-  destinations: Destination[];
+  profiles: Profile[];
 }
