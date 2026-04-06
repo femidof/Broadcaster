@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Opt into Node 24 for JS actions (tauri-action may still ship on Node 20 until upstream updates).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: write
 
@@ -92,11 +96,13 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const { data: releases } = await github.rest.repos.listReleases({
+            const tag = context.ref.replace('refs/tags/', '');
+            const releases = await github.paginate(github.rest.repos.listReleases, {
               owner: context.repo.owner,
               repo: context.repo.repo,
+              per_page: 100,
             });
-            const draft = releases.find(r => r.draft && r.tag_name === context.ref.replace('refs/tags/', ''));
+            const draft = releases.find((r) => r.draft && r.tag_name === tag);
             if (draft) {
               await github.rest.repos.updateRelease({
                 owner: context.repo.owner,
@@ -104,4 +110,6 @@ jobs:
                 release_id: draft.id,
                 draft: false,
               });
+            } else {
+              console.log(`::warning::No draft release found for tag ${tag}; skipping publish (check tag name and draft state).`);
             }
