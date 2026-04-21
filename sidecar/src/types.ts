@@ -15,6 +15,10 @@ export interface Destination {
   url: string;
   streamKey: string;
   enabled: boolean;
+  /** Route this destination through the bundled ffmpeg instead of the native RTMP client. */
+  useFfmpeg?: boolean;
+  /** Optional override for ffmpeg output args (defaults to `-c copy`). Only used when useFfmpeg is true. */
+  ffmpegArgs?: string;
 }
 
 export interface RelayStatus {

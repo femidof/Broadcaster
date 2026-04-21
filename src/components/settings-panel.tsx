@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RefreshCw, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -6,8 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import type { ProfileStatus } from "@/lib/types";
-
-const APP_VERSION = "2.0.0";
+import { getVersion } from "@tauri-apps/api/app";
 
 interface SettingsPanelProps {
   selectedProfile: ProfileStatus | null;
@@ -142,6 +141,16 @@ export function SettingsPanel({
   onDebugModeChange,
   onCheckUpdates,
 }: SettingsPanelProps) {
+  const [appVersion, setAppVersion] = useState<string>("2.1.0");
+
+  useEffect(() => {
+    getVersion()
+      .then((v) => setAppVersion(v))
+      .catch(() => {
+        // ignore (e.g. running outside tauri)
+      });
+  }, []);
+
   if (!selectedProfile) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -187,7 +196,7 @@ export function SettingsPanel({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium">Broadcaster</p>
-              <p className="text-xs text-muted-foreground">Version {APP_VERSION}</p>
+              <p className="text-xs text-muted-foreground">Version {appVersion}</p>
             </div>
             <Button variant="outline" size="sm" onClick={onCheckUpdates}>
               <RefreshCw className="h-3.5 w-3.5" />

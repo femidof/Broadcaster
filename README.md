@@ -7,6 +7,8 @@
   </table>
 </div>
 
+**Current version:** **2.1.0**
+
 A lightweight desktop multistream relay app. Stream to Twitch, YouTube, Facebook Live, Instagram Live, TikTok Live, Trovo, Kick, Restream, BIGO LIVE, and custom RTMP destinations simultaneously. **Version 2** adds **profiles**: multiple named setups, each with its own local RTMP port and destination list, so you can run several ingest servers at once (for example backup or split distribution).
 
 Built with **Tauri v2** (Rust) + **React** + **Node.js sidecar**.
@@ -140,6 +142,18 @@ If the app isn't working as expected after install, enable **Debug Mode** to see
 4. The setting persists across restarts
 
 This surfaces errors that would otherwise only appear in system logs, making it easy to diagnose issues like port conflicts, missing binaries, or FFmpeg failures without external tooling.
+
+## Troubleshooting
+
+### Windows shortcut still shows the old / generic icon
+
+Windows caches shortcut and Start Menu icons per install path. If you installed a previous build, Explorer may keep showing the stale icon even after reinstalling. The installer now asks Explorer to refresh automatically, but if the icon is still wrong, run this from `cmd` and then close/reopen Explorer windows:
+
+```cmd
+ie4uinit.exe -show
+```
+
+If that does not help, sign out and back in (or reboot). As a last resort you can delete the icon cache database at `%LocalAppData%\IconCache.db` and restart `explorer.exe`.
 
 ## Updater
 

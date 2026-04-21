@@ -1,9 +1,16 @@
 import { Destination, RelayStatus } from "./types";
 import { DirectRelay } from "./rtmp-relay";
+import { FfmpegRelay } from "./ffmpeg-relay";
+
+interface RelayBackend {
+  start(): void;
+  stop(): void;
+  getStats(): { bitrateKbps: number };
+}
 
 interface RelayProcess {
   destination: Destination;
-  relay: DirectRelay | null;
+  relay: RelayBackend | null;
   status: "idle" | "live" | "error";
   error?: string;
   restartCount: number;
@@ -125,6 +132,11 @@ export class RelayManager {
     }
 
     const wasEnabled = existing.destination.enabled;
+    const wasFfmpeg = existing.destination.useFfmpeg === true;
+    const nowFfmpeg = dest.useFfmpeg === true;
+    const backendChanged =
+      wasFfmpeg !== nowFfmpeg ||
+      (nowFfmpeg && existing.destination.ffmpegArgs !== dest.ffmpegArgs);
     const urlChanged =
       existing.destination.url !== dest.url ||
       existing.destination.streamKey !== dest.streamKey;
@@ -142,7 +154,7 @@ export class RelayManager {
       if (this.streamActive) {
         this.startRelay(existing);
       }
-    } else if (dest.enabled && urlChanged && this.streamActive) {
+    } else if (dest.enabled && (urlChanged || backendChanged) && this.streamActive) {
       this.stopRelay(existing, "config_changed");
       existing.restartCount = 0;
       setTimeout(() => this.startRelay(existing), 500);
@@ -209,55 +221,69 @@ export class RelayManager {
 
     const inputUrl = `rtmp://127.0.0.1:${this.ingestPort}/live/${this.activeStreamKey}`;
     const outputUrl = this.buildRtmpUrl(relay.destination);
+    const useFfmpeg = relay.destination.useFfmpeg === true;
+
+    const callbacks = {
+      onStarted: () => {
+        relay.status = "live";
+        relay.error = undefined;
+        this.callbacks.onRelayStarted(relay.destination.id);
+      },
+      onStopped: (reason: string) => {
+        relay.relay = null;
+        relay.bitrateKbps = 0;
+        if (relay.stopped) {
+          relay.status = "idle";
+          return;
+        }
+        if (this.streamActive && this.pushing) {
+          relay.status = "error";
+          relay.error = `Relay stopped: ${reason}`;
+          relay.restartCount++;
+          this.callbacks.onRelayError(relay.destination.id, relay.error);
+          this.scheduleRestart(relay);
+        } else {
+          relay.status = "idle";
+          this.callbacks.onRelayStopped(relay.destination.id, reason);
+        }
+      },
+      onError: (error: string) => {
+        relay.relay = null;
+        relay.bitrateKbps = 0;
+        relay.status = "error";
+        relay.error = error;
+        this.callbacks.onRelayError(relay.destination.id, error);
+        if (!relay.stopped && this.streamActive && this.pushing) {
+          relay.restartCount++;
+          this.scheduleRestart(relay);
+        }
+      },
+      onDebugLog: (message: string) => {
+        this.callbacks.onDebugLog?.(
+          `relay:${relay.destination.name}`,
+          message
+        );
+      },
+    };
 
     try {
-      const directRelay = new DirectRelay(inputUrl, outputUrl, relay.destination.name, {
-        onStarted: () => {
-          relay.status = "live";
-          relay.error = undefined;
-          this.callbacks.onRelayStarted(relay.destination.id);
-        },
-        onStopped: (reason) => {
-          relay.relay = null;
-          relay.bitrateKbps = 0;
-          if (relay.stopped) {
-            relay.status = "idle";
-            return;
-          }
-          if (this.streamActive && this.pushing) {
-            relay.status = "error";
-            relay.error = `Relay stopped: ${reason}`;
-            relay.restartCount++;
-            this.callbacks.onRelayError(relay.destination.id, relay.error);
-            this.scheduleRestart(relay);
-          } else {
-            relay.status = "idle";
-            this.callbacks.onRelayStopped(relay.destination.id, reason);
-          }
-        },
-        onError: (error) => {
-          relay.relay = null;
-          relay.bitrateKbps = 0;
-          relay.status = "error";
-          relay.error = error;
-          this.callbacks.onRelayError(relay.destination.id, error);
-          if (!relay.stopped && this.streamActive && this.pushing) {
-            relay.restartCount++;
-            this.scheduleRestart(relay);
-          }
-        },
-        onDebugLog: (message) => {
-          this.callbacks.onDebugLog?.(
-            `relay:${relay.destination.name}`,
-            message
-          );
-        },
-      });
+      const backend: RelayBackend = useFfmpeg
+        ? new FfmpegRelay(
+            inputUrl,
+            outputUrl,
+            relay.destination.name,
+            relay.destination.ffmpegArgs,
+            callbacks
+          )
+        : new DirectRelay(inputUrl, outputUrl, relay.destination.name, callbacks);
 
-      relay.relay = directRelay;
-      relay.status = "live";
+      relay.relay = backend;
       relay.error = undefined;
-      directRelay.start();
+      this.callbacks.onDebugLog?.(
+        "relay-manager",
+        `Starting ${useFfmpeg ? "ffmpeg" : "native"} relay for ${relay.destination.name}`
+      );
+      backend.start();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       relay.status = "error";

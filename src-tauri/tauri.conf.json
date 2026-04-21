@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Broadcaster",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "identifier": "com.broadcaster.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -44,7 +44,10 @@
     "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "displayLanguageSelector": false,
+        "installerHooks": "installer-hooks.nsh"
       }
     }
   },

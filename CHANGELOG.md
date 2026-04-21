@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-04-17
+
+### Added
+
+- **Per-destination FFmpeg relay mode**: Destinations can optionally be relayed via the bundled FFmpeg (with optional advanced args) instead of the native RTMP client.
+- **Windows icon improvements**: Regenerated app icons, set the NSIS installer icon, and added installer hooks to refresh the Windows shell icon cache.
+
 ## [2.0.0] - 2026-04-05
 
 ### Added

@@ -25,14 +25,35 @@ function defaultConfig(): AppConfig {
 function isDestination(value: unknown): value is Destination {
   if (!value || typeof value !== "object") return false;
   const d = value as Record<string, unknown>;
-  return (
-    typeof d.id === "string" &&
-    typeof d.name === "string" &&
-    typeof d.platform === "string" &&
-    typeof d.url === "string" &&
-    typeof d.streamKey === "string" &&
-    typeof d.enabled === "boolean"
-  );
+  if (
+    typeof d.id !== "string" ||
+    typeof d.name !== "string" ||
+    typeof d.platform !== "string" ||
+    typeof d.url !== "string" ||
+    typeof d.streamKey !== "string" ||
+    typeof d.enabled !== "boolean"
+  ) {
+    return false;
+  }
+  if (d.useFfmpeg !== undefined && typeof d.useFfmpeg !== "boolean") return false;
+  if (d.ffmpegArgs !== undefined && typeof d.ffmpegArgs !== "string") return false;
+  return true;
+}
+
+function normalizeDestination(d: Destination): Destination {
+  const out: Destination = {
+    id: d.id,
+    name: d.name,
+    platform: d.platform,
+    url: d.url,
+    streamKey: d.streamKey,
+    enabled: d.enabled,
+  };
+  if (d.useFfmpeg) out.useFfmpeg = true;
+  if (typeof d.ffmpegArgs === "string" && d.ffmpegArgs.trim().length > 0) {
+    out.ffmpegArgs = d.ffmpegArgs;
+  }
+  return out;
 }
 
 function parseProfile(value: unknown): Profile | null {
@@ -195,7 +216,7 @@ export class ConfigStore {
   addDestination(profileId: string, dest: Destination): void {
     const p = this.getProfile(profileId);
     if (!p) return;
-    p.destinations.push(dest);
+    p.destinations.push(normalizeDestination(dest));
     this.save();
   }
 
@@ -204,7 +225,7 @@ export class ConfigStore {
     if (!p) return;
     const idx = p.destinations.findIndex((d) => d.id === dest.id);
     if (idx !== -1) {
-      p.destinations[idx] = dest;
+      p.destinations[idx] = normalizeDestination(dest);
       this.save();
     }
   }

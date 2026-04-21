@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -37,6 +38,8 @@ const EMPTY_DESTINATION: Destination = {
   url: "",
   streamKey: "",
   enabled: true,
+  useFfmpeg: false,
+  ffmpegArgs: "",
 };
 
 export function DestinationsPanel({
@@ -51,18 +54,21 @@ export function DestinationsPanel({
   const [doctorOpen, setDoctorOpen] = useState(false);
   const [editing, setEditing] = useState<Destination | null>(null);
   const [form, setForm] = useState<Destination>({ ...EMPTY_DESTINATION });
+  const [showAdvancedFfmpeg, setShowAdvancedFfmpeg] = useState(false);
   const selectedPreset =
     form.platform !== "custom" ? PLATFORM_PRESETS[form.platform] : undefined;
 
   function openAdd() {
     setEditing(null);
     setForm({ ...EMPTY_DESTINATION, id: generateId() });
+    setShowAdvancedFfmpeg(false);
     setDialogOpen(true);
   }
 
   function openEdit(dest: Destination) {
     setEditing(dest);
-    setForm({ ...dest });
+    setForm({ ...dest, useFfmpeg: dest.useFfmpeg ?? false, ffmpegArgs: dest.ffmpegArgs ?? "" });
+    setShowAdvancedFfmpeg(Boolean(dest.ffmpegArgs && dest.ffmpegArgs.trim().length > 0));
     setDialogOpen(true);
   }
 
@@ -88,10 +94,24 @@ export function DestinationsPanel({
   function handleSave() {
     if (!form.name.trim() || !form.url.trim() || !form.streamKey.trim()) return;
 
+    const trimmedArgs = form.ffmpegArgs?.trim() ?? "";
+    const normalized: Destination = {
+      id: form.id,
+      name: form.name,
+      platform: form.platform,
+      url: form.url,
+      streamKey: form.streamKey,
+      enabled: form.enabled,
+      useFfmpeg: form.useFfmpeg === true,
+      ...(form.useFfmpeg && trimmedArgs.length > 0
+        ? { ffmpegArgs: trimmedArgs }
+        : {}),
+    };
+
     if (editing) {
-      onUpdate(form);
+      onUpdate(normalized);
     } else {
-      onAdd(form);
+      onAdd(normalized);
     }
     setDialogOpen(false);
   }
@@ -209,6 +229,54 @@ export function DestinationsPanel({
                   setForm({ ...form, streamKey: e.target.value })
                 }
               />
+            </div>
+
+            <div className="space-y-2 rounded-md border p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="useFfmpeg" className="cursor-pointer">
+                    Use FFmpeg
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Route through the bundled ffmpeg instead of the native RTMP client. Try this
+                    for destinations that reject the native client (e.g. Instagram, some TikTok setups).
+                  </p>
+                </div>
+                <Switch
+                  id="useFfmpeg"
+                  checked={form.useFfmpeg === true}
+                  onCheckedChange={(checked) =>
+                    setForm({ ...form, useFfmpeg: checked })
+                  }
+                />
+              </div>
+
+              {form.useFfmpeg ? (
+                <div className="space-y-2 pt-1">
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+                    onClick={() => setShowAdvancedFfmpeg((v) => !v)}
+                  >
+                    {showAdvancedFfmpeg ? "Hide" : "Show"} advanced FFmpeg args
+                  </button>
+                  {showAdvancedFfmpeg ? (
+                    <div className="space-y-1">
+                      <Input
+                        id="ffmpegArgs"
+                        placeholder="-c copy"
+                        value={form.ffmpegArgs ?? ""}
+                        onChange={(e) =>
+                          setForm({ ...form, ffmpegArgs: e.target.value })
+                        }
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Output args only. Leave blank for <code>-c copy</code> (stream copy).
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
 

@@ -16,6 +16,10 @@ pub struct Destination {
     #[serde(rename = "streamKey")]
     pub stream_key: String,
     pub enabled: bool,
+    #[serde(rename = "useFfmpeg", default, skip_serializing_if = "std::ops::Not::not")]
+    pub use_ffmpeg: bool,
+    #[serde(rename = "ffmpegArgs", default, skip_serializing_if = "Option::is_none")]
+    pub ffmpeg_args: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,6 +159,7 @@ struct RuntimePaths {
     mode: &'static str,
     sidecar_binary_path: PathBuf,
     sidecar_identifier: String,
+    ffmpeg_binary_path: Option<PathBuf>,
     attempts: Vec<String>,
 }
 
@@ -168,11 +173,14 @@ fn resolve_runtime_paths(resource_dir: &Path, target_triple: &str, ext: &str) ->
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(exe_dir) = current_exe.parent() {
             let bundled_sidecar = exe_dir.join(format!("broadcaster-sidecar{ext}"));
+            let bundled_ffmpeg = exe_dir.join(format!("ffmpeg{ext}"));
             let sidecar_ok = is_binary_ready(&bundled_sidecar);
+            let ffmpeg_ok = is_binary_ready(&bundled_ffmpeg);
 
             attempts.push(format!(
-                "bundled: sidecar={} ({sidecar_ok})",
-                bundled_sidecar.display()
+                "bundled: sidecar={} ({sidecar_ok}), ffmpeg={} ({ffmpeg_ok})",
+                bundled_sidecar.display(),
+                bundled_ffmpeg.display()
             ));
 
             if sidecar_ok {
@@ -180,6 +188,7 @@ fn resolve_runtime_paths(resource_dir: &Path, target_triple: &str, ext: &str) ->
                     mode: "bundled",
                     sidecar_binary_path: bundled_sidecar,
                     sidecar_identifier: "broadcaster-sidecar".to_string(),
+                    ffmpeg_binary_path: if ffmpeg_ok { Some(bundled_ffmpeg) } else { None },
                     attempts,
                 };
             }
@@ -187,16 +196,20 @@ fn resolve_runtime_paths(resource_dir: &Path, target_triple: &str, ext: &str) ->
     }
 
     let dev_sidecar = resource_dir.join(format!("binaries/broadcaster-sidecar-{target_triple}{ext}"));
+    let dev_ffmpeg = resource_dir.join(format!("binaries/ffmpeg-{target_triple}{ext}"));
     let sidecar_ok = is_binary_ready(&dev_sidecar);
+    let ffmpeg_ok = is_binary_ready(&dev_ffmpeg);
     attempts.push(format!(
-        "dev: sidecar={} ({sidecar_ok})",
-        dev_sidecar.display()
+        "dev: sidecar={} ({sidecar_ok}), ffmpeg={} ({ffmpeg_ok})",
+        dev_sidecar.display(),
+        dev_ffmpeg.display()
     ));
 
     RuntimePaths {
         mode: "dev",
         sidecar_binary_path: dev_sidecar,
         sidecar_identifier: "binaries/broadcaster-sidecar".to_string(),
+        ffmpeg_binary_path: if ffmpeg_ok { Some(dev_ffmpeg) } else { None },
         attempts,
     }
 }
@@ -257,12 +270,19 @@ pub async fn spawn_sidecar(app: &AppHandle) -> Result<(), String> {
         sidecar_ids.push(fallback_id);
     }
 
+    let ffmpeg_path_str = resolved
+        .ffmpeg_binary_path
+        .as_ref()
+        .map(|p| p.to_string_lossy().to_string());
+
     emit_debug_log(
         app,
         "sidecar",
         format!(
-            "Startup preflight passed, launching sidecar process (mode={}, sidecar_ids={:?})",
-            resolved.mode, sidecar_ids
+            "Startup preflight passed, launching sidecar process (mode={}, sidecar_ids={:?}, ffmpeg_path={})",
+            resolved.mode,
+            sidecar_ids,
+            ffmpeg_path_str.clone().unwrap_or_else(|| "<none>".to_string())
         ),
     );
 
@@ -273,22 +293,25 @@ pub async fn spawn_sidecar(app: &AppHandle) -> Result<(), String> {
 
     for sidecar_id in sidecar_ids.iter() {
         match app.shell().sidecar(sidecar_id) {
-            Ok(sidecar_cmd) => match sidecar_cmd
-                .args(["--data-dir", &data_dir_str])
-                .spawn()
-            {
-                Ok((rx, child)) => {
-                    used_sidecar_id = Some(sidecar_id.clone());
-                    sidecar_rx = Some(rx);
-                    sidecar_child = Some(child);
-                    break;
+            Ok(sidecar_cmd) => {
+                let mut cmd = sidecar_cmd.args(["--data-dir", &data_dir_str]);
+                if let Some(ref p) = ffmpeg_path_str {
+                    cmd = cmd.env("BROADCASTER_FFMPEG_PATH", p);
                 }
-                Err(e) => {
-                    let msg = format!("Failed to spawn sidecar with id '{sidecar_id}': {e}");
-                    emit_debug_log(app, "sidecar", msg.clone());
-                    last_error = Some(msg);
+                match cmd.spawn() {
+                    Ok((rx, child)) => {
+                        used_sidecar_id = Some(sidecar_id.clone());
+                        sidecar_rx = Some(rx);
+                        sidecar_child = Some(child);
+                        break;
+                    }
+                    Err(e) => {
+                        let msg = format!("Failed to spawn sidecar with id '{sidecar_id}': {e}");
+                        emit_debug_log(app, "sidecar", msg.clone());
+                        last_error = Some(msg);
+                    }
                 }
-            },
+            }
             Err(e) => {
                 let msg = format!("Failed to create sidecar command with id '{sidecar_id}': {e}");
                 emit_debug_log(app, "sidecar", msg.clone());

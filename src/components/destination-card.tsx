@@ -77,6 +77,11 @@ export function DestinationCard({
                 {destination.name}
               </span>
               <StatusBadge status={relayStatus} />
+              {destination.useFfmpeg ? (
+                <Badge variant="secondary" title="Relaying through bundled ffmpeg">
+                  FFmpeg
+                </Badge>
+              ) : null}
               {relayStatus && (
                 <SignalStrength
                   bitrateKbps={relayStatus.bitrateKbps}
