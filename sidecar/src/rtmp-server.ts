@@ -1,4 +1,5 @@
 import NodeMediaServer from "node-media-server";
+import { SLATE_RTMP_STREAM_KEY } from "./types";
 
 export interface RtmpServerCallbacks {
   onStreamConnect: (streamKey: string) => void;
@@ -40,6 +41,7 @@ export class RtmpServer {
         "rtmp-server",
         `Incoming publish: ${JSON.stringify({ streamPath, streamKey: key })}`
       );
+      if (key === SLATE_RTMP_STREAM_KEY) return;
       if (key && !this.activeStreams.has(key)) {
         this.activeStreams.add(key);
         this.callbacks.onStreamConnect(key);
@@ -52,6 +54,7 @@ export class RtmpServer {
         "rtmp-server",
         `Publish ended: ${JSON.stringify({ streamPath, streamKey: key })}`
       );
+      if (key === SLATE_RTMP_STREAM_KEY) return;
       if (key && this.activeStreams.has(key)) {
         this.activeStreams.delete(key);
         this.callbacks.onStreamDisconnect(key);

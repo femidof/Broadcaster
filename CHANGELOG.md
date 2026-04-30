@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-04-29
+
+### Added
+
+- **Stream fallback slate**: Per-profile optional fallback image or looping video. While you are live (pushing to destinations), if OBS disconnects Broadcaster can wait a configurable grace period, then publish fallback media to local ingest and keep relays running until OBS reconnects. Uses bundled FFmpeg for encoding and reserves ingest stream key `_bc_slate` (do not use that key in your encoder).
+- **Settings**: Toggle fallback slate, grace period (ms), media path with file picker (`@tauri-apps/plugin-dialog`).
+
+### Changed
+
+- Stream connect/disconnect UI state refreshes from the sidecar status after ingest events so relay mode (including slate) stays accurate.
+
 ## [2.1.0] - 2026-04-17
 
 ### Added

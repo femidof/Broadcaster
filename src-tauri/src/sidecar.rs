@@ -24,12 +24,33 @@ pub struct Destination {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(default)]
+pub struct StreamFallbackSlate {
+    pub enabled: bool,
+    pub media_path: String,
+    pub grace_period_ms: u32,
+}
+
+impl Default for StreamFallbackSlate {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            media_path: String::new(),
+            grace_period_ms: 2000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Profile {
     pub id: String,
     pub name: String,
     pub port: u16,
     pub auto_start: bool,
     pub destinations: Vec<Destination>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_fallback_slate: Option<StreamFallbackSlate>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

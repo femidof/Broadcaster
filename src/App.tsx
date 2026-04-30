@@ -11,6 +11,7 @@ import type {
   Profile,
   ProfileStatus,
   SidecarEvent,
+  StreamFallbackSlate,
 } from "@/lib/types";
 import * as api from "@/lib/tauri";
 import { featureFlags } from "@/lib/feature-flags";
@@ -48,6 +49,7 @@ const DEFAULT_INITIAL_PROFILE_STATUS: ProfileStatus = {
   serverRunning: false,
   streamActive: false,
   pushing: false,
+  slateActive: false,
   relays: [],
   destinations: [],
 };
@@ -63,13 +65,17 @@ function toErrorMessage(error: unknown): string {
 }
 
 function profileStatusToProfile(p: ProfileStatus): Profile {
-  return {
+  const base: Profile = {
     id: p.profileId,
     name: p.profileName,
     port: p.port,
     autoStart: p.autoStart,
     destinations: p.destinations.map((d) => ({ ...d })),
   };
+  if (p.streamFallbackSlate !== undefined) {
+    base.streamFallbackSlate = { ...p.streamFallbackSlate };
+  }
+  return base;
 }
 
 function bitrateKey(profileId: string, destinationId: string): string {
@@ -181,6 +187,7 @@ export default function App() {
                     ...p,
                     serverRunning: false,
                     streamActive: false,
+                    slateActive: false,
                     pushing: false,
                     relays: p.relays.map((r) => ({
                       ...r,
@@ -200,6 +207,7 @@ export default function App() {
               ...p,
               serverRunning: false,
               streamActive: false,
+              slateActive: false,
               pushing: false,
               relays: p.relays.map((r) => ({
                 ...r,
@@ -211,33 +219,11 @@ export default function App() {
           break;
 
         case "stream_connected":
-          setAppStatus((prev) => ({
-            ...prev,
-            profiles: prev.profiles.map((p) =>
-              p.profileId === event.profileId ? { ...p, streamActive: true } : p
-            ),
-          }));
+          void api.getStatus();
           break;
 
         case "stream_disconnected":
-          pushingRef.current = false;
-          setAppStatus((prev) => ({
-            ...prev,
-            profiles: prev.profiles.map((p) =>
-              p.profileId === event.profileId
-                ? {
-                    ...p,
-                    streamActive: false,
-                    pushing: false,
-                    relays: p.relays.map((r) => ({
-                      ...r,
-                      status: "idle" as const,
-                      bitrateKbps: 0,
-                    })),
-                  }
-                : p
-            ),
-          }));
+          void api.getStatus();
           break;
 
         case "relay_started":
@@ -525,16 +511,25 @@ export default function App() {
     }
   }
 
+  async function handleStreamFallbackSlateChange(slate: StreamFallbackSlate) {
+    if (!selectedProfile) return;
+    try {
+      await api.updateProfile(
+        profileStatusToProfile({ ...selectedProfile, streamFallbackSlate: slate })
+      );
+    } catch (e) {
+      const msg = `Failed to update stream fallback: ${toErrorMessage(e)}`;
+      console.error(msg, e);
+      pushDebugLog("ui", msg, "error");
+    }
+  }
+
   async function handleProfileNameChange(name: string) {
     if (!selectedProfile) return;
     try {
-      await api.updateProfile({
-        id: selectedProfile.profileId,
-        name,
-        port: selectedProfile.port,
-        autoStart: selectedProfile.autoStart,
-        destinations: selectedProfile.destinations.map((d) => ({ ...d })),
-      });
+      await api.updateProfile(
+        profileStatusToProfile({ ...selectedProfile, profileName: name })
+      );
     } catch (e) {
       const msg = `Failed to rename profile: ${toErrorMessage(e)}`;
       console.error(msg, e);
@@ -607,6 +602,7 @@ export default function App() {
         port: selectedProfile.port,
         streamActive: selectedProfile.streamActive,
         pushing: selectedProfile.pushing,
+        slateActive: selectedProfile.slateActive,
         relays: selectedProfile.relays,
         destinations: selectedProfile.destinations,
       }
@@ -615,6 +611,7 @@ export default function App() {
         port: 1935,
         streamActive: false,
         pushing: false,
+        slateActive: false,
         relays: [],
         destinations: [],
       };
@@ -679,6 +676,7 @@ export default function App() {
             onPortChange={handlePortChange}
             onAutoStartChange={handleAutoStartChange}
             onDeleteProfile={handleDeleteProfile}
+            onStreamFallbackSlateChange={handleStreamFallbackSlateChange}
             debugMode={appStatus.debugMode}
             onDebugModeChange={handleDebugModeChange}
             onCheckUpdates={handleCheckUpdates}

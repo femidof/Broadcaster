@@ -30,12 +30,27 @@ export interface RelayStatus {
   bitrateKbps: number;
 }
 
+/** Reserved RTMP stream key for internal slate injector — encoders must not use this key. */
+export const SLATE_RTMP_STREAM_KEY = "_bc_slate";
+
+/** OBS disconnect fallback: FFmpeg publishes this media to local ingest while relays stay live. */
+export interface StreamFallbackSlate {
+  enabled: boolean;
+  mediaPath: string;
+  gracePeriodMs: number;
+}
+
+export const SLATE_GRACE_PERIOD_MS_DEFAULT = 2000;
+export const SLATE_GRACE_PERIOD_MS_MIN = 0;
+export const SLATE_GRACE_PERIOD_MS_MAX = 60000;
+
 export interface Profile {
   id: string;
   name: string;
   port: number;
   autoStart: boolean;
   destinations: Destination[];
+  streamFallbackSlate?: StreamFallbackSlate;
 }
 
 export interface ProfileStatus {
@@ -44,8 +59,12 @@ export interface ProfileStatus {
   port: number;
   autoStart: boolean;
   serverRunning: boolean;
+  /** True when OBS (or another encoder) is publishing to ingest — excludes internal slate publisher. */
   streamActive: boolean;
   pushing: boolean;
+  /** True when relays are pulling the slate injector stream instead of OBS. */
+  slateActive: boolean;
+  streamFallbackSlate?: StreamFallbackSlate;
   relays: RelayStatus[];
   destinations: Destination[];
 }

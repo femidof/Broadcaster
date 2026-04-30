@@ -1,6 +1,7 @@
-import { Destination, RelayStatus } from "./types";
+import { Destination, RelayStatus, SLATE_RTMP_STREAM_KEY, StreamFallbackSlate } from "./types";
 import { DirectRelay } from "./rtmp-relay";
 import { FfmpegRelay } from "./ffmpeg-relay";
+import { SlateInjector } from "./slate-injector";
 
 interface RelayBackend {
   start(): void;
@@ -29,14 +30,24 @@ export interface RelayManagerCallbacks {
 const MAX_RESTARTS = 5;
 const BASE_RESTART_DELAY_MS = 5_000;
 const MAX_RESTART_DELAY_MS = 60_000;
+const SLATE_INJECTOR_SETTLE_MS = 800;
 
 export class RelayManager {
   private relays = new Map<string, RelayProcess>();
   private ingestPort: number;
   private callbacks: RelayManagerCallbacks;
-  private streamActive = false;
-  private activeStreamKey: string | null = null;
+  /** OBS / encoder publishing to ingest (not slate injector). */
+  private obsConnected = false;
+  private obsStreamKey: string | null = null;
   private pushing = false;
+  /** Relays are pulling slate FFmpeg publisher. */
+  private slateMode = false;
+  private slateInjector = new SlateInjector();
+  private slateGraceTimer: ReturnType<typeof setTimeout> | null = null;
+  private slateInjectorSettleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped when intentionally stopping/replacing slate FFmpeg — ignores stale process exits. */
+  private slateInjectorSessionId = 0;
+  private slateConfig: StreamFallbackSlate | undefined;
 
   constructor(ingestPort: number, callbacks: RelayManagerCallbacks) {
     this.ingestPort = ingestPort;
@@ -47,21 +58,166 @@ export class RelayManager {
     this.ingestPort = port;
   }
 
+  /** Persisted profile settings for OBS disconnect fallback. */
+  setStreamFallbackSlate(config: StreamFallbackSlate | undefined): void {
+    this.slateConfig = config;
+  }
+
   isPushing(): boolean {
     return this.pushing;
   }
 
+  /** True while relays ingest the internal slate FFmpeg stream. */
+  isSlateFallbackActive(): boolean {
+    return this.slateMode;
+  }
+
+  private clearSlateGraceTimer(): void {
+    if (this.slateGraceTimer) {
+      clearTimeout(this.slateGraceTimer);
+      this.slateGraceTimer = null;
+    }
+  }
+
+  private clearSlateSettleTimer(): void {
+    if (this.slateInjectorSettleTimer) {
+      clearTimeout(this.slateInjectorSettleTimer);
+      this.slateInjectorSettleTimer = null;
+    }
+  }
+
+  private bumpSlateInjectorSession(): void {
+    this.slateInjectorSessionId++;
+  }
+
+  private ingestRecoverable(): boolean {
+    return this.obsConnected || this.slateMode;
+  }
+
+  private effectivePullStreamKey(): string | null {
+    if (this.slateMode) return SLATE_RTMP_STREAM_KEY;
+    return this.obsStreamKey;
+  }
+
+  private slateEligible(): boolean {
+    const s = this.slateConfig;
+    return !!(s?.enabled && s.mediaPath.trim().length > 0);
+  }
+
+  private haltRelays(reason: string): void {
+    for (const [, relay] of this.relays) {
+      this.stopRelay(relay, reason);
+    }
+  }
+
+  private restartRelaysForStreamKey(streamKey: string): void {
+    this.callbacks.onDebugLog?.(
+      "relay-manager",
+      `Restarting relays for ingest key ${streamKey}`
+    );
+    for (const [, relay] of this.relays) {
+      if (!relay.destination.enabled || relay.stopped) continue;
+      if (relay.relay) this.stopRelay(relay, "input_swap");
+      relay.restartCount = 0;
+      relay.error = undefined;
+      this.startRelay(relay, streamKey);
+    }
+  }
+
+  private needsRelayResume(): boolean {
+    for (const [, r] of this.relays) {
+      if (!r.destination.enabled || r.stopped) continue;
+      if (!r.relay) return true;
+    }
+    return false;
+  }
+
+  private onSlateGraceElapsed(): void {
+    this.slateGraceTimer = null;
+    if (!this.pushing || this.obsConnected) return;
+
+    const slate = this.slateConfig;
+    if (!slate?.enabled || !slate.mediaPath.trim()) {
+      this.callbacks.onDebugLog?.(
+        "relay-manager",
+        "Slate grace elapsed but slate disabled — stopping push"
+      );
+      this.stopPushing();
+      return;
+    }
+
+    this.clearSlateSettleTimer();
+    this.bumpSlateInjectorSession();
+    this.slateInjector.stop();
+
+    const sessionAtStart = this.slateInjectorSessionId;
+    const started = this.slateInjector.start(this.ingestPort, slate.mediaPath, {
+      onExit: (code, signal) => {
+        if (sessionAtStart !== this.slateInjectorSessionId) return;
+        this.callbacks.onDebugLog?.(
+          "relay-manager",
+          `Slate injector exited code=${code} signal=${signal ?? "none"}`
+        );
+        if (!this.pushing || this.obsConnected) return;
+        this.callbacks.onDebugLog?.(
+          "relay-manager",
+          "Slate FFmpeg stopped while fallback was required — stopping push"
+        );
+        this.stopPushing();
+      },
+      onDebugLog: (msg) => this.callbacks.onDebugLog?.("slate-injector", msg),
+    });
+
+    if (!started) {
+      this.callbacks.onDebugLog?.("relay-manager", "Slate injector failed to start");
+      this.stopPushing();
+      return;
+    }
+
+    this.slateInjectorSettleTimer = setTimeout(() => {
+      this.slateInjectorSettleTimer = null;
+      if (!this.pushing || this.obsConnected) {
+        this.bumpSlateInjectorSession();
+        this.slateInjector.stop();
+        return;
+      }
+      this.slateMode = true;
+      this.restartRelaysForStreamKey(SLATE_RTMP_STREAM_KEY);
+    }, SLATE_INJECTOR_SETTLE_MS);
+  }
+
   onStreamConnect(streamKey: string): void {
-    this.streamActive = true;
-    this.activeStreamKey = streamKey;
+    if (streamKey === SLATE_RTMP_STREAM_KEY) return;
+
+    this.clearSlateGraceTimer();
+
+    this.obsConnected = true;
+    this.obsStreamKey = streamKey;
     this.callbacks.onDebugLog?.(
       "relay-manager",
       `Source stream connected: ${streamKey}`
     );
+
+    if (!this.pushing) return;
+
+    if (this.slateMode) {
+      this.clearSlateSettleTimer();
+      this.bumpSlateInjectorSession();
+      this.slateMode = false;
+      this.slateInjector.stop();
+      this.restartRelaysForStreamKey(streamKey);
+      return;
+    }
+
+    if (this.needsRelayResume()) {
+      this.restartRelaysForStreamKey(streamKey);
+    }
   }
 
   onStreamDisconnect(streamKey: string): void {
-    if (this.activeStreamKey && this.activeStreamKey !== streamKey) {
+    if (streamKey === SLATE_RTMP_STREAM_KEY) return;
+
+    if (this.obsStreamKey && this.obsStreamKey !== streamKey) {
       this.callbacks.onDebugLog?.(
         "relay-manager",
         `Ignoring disconnect for inactive stream key: ${streamKey}`
@@ -69,20 +225,33 @@ export class RelayManager {
       return;
     }
 
-    this.streamActive = false;
-    this.activeStreamKey = null;
+    this.obsConnected = false;
+    this.obsStreamKey = null;
 
-    if (this.pushing) {
+    if (!this.pushing) return;
+
+    if (this.slateEligible()) {
       this.callbacks.onDebugLog?.(
         "relay-manager",
-        "Source disconnected — stopping all relays"
+        "OBS disconnected — halting relays for slate fallback grace period"
       );
-      this.stopPushing();
+      this.clearSlateGraceTimer();
+      this.clearSlateSettleTimer();
+      this.haltRelays("obs_disconnected");
+      const delay = Math.max(0, this.slateConfig!.gracePeriodMs);
+      this.slateGraceTimer = setTimeout(() => this.onSlateGraceElapsed(), delay);
+      return;
     }
+
+    this.callbacks.onDebugLog?.(
+      "relay-manager",
+      "Source disconnected — stopping all relays"
+    );
+    this.stopPushing();
   }
 
   pushDestinations(): void {
-    if (!this.streamActive || !this.activeStreamKey) {
+    if (!this.obsConnected || !this.obsStreamKey) {
       this.callbacks.onDebugLog?.(
         "relay-manager",
         "Cannot push: no active source stream"
@@ -93,16 +262,23 @@ export class RelayManager {
     this.pushing = true;
     this.callbacks.onDebugLog?.("relay-manager", "Starting push to all enabled destinations");
 
+    const pullKey = this.obsStreamKey;
     for (const [, relay] of this.relays) {
       relay.restartCount = 0;
       relay.stopped = false;
       if (relay.destination.enabled) {
-        this.startRelay(relay);
+        this.startRelay(relay, pullKey);
       }
     }
   }
 
   stopPushing(): void {
+    this.clearSlateGraceTimer();
+    this.clearSlateSettleTimer();
+    this.bumpSlateInjectorSession();
+    this.slateInjector.stop();
+    this.slateMode = false;
+
     this.pushing = false;
     this.callbacks.onDebugLog?.("relay-manager", "Stopping push to all destinations");
 
@@ -145,19 +321,21 @@ export class RelayManager {
 
     if (!this.pushing) return;
 
+    const pullKey = this.effectivePullStreamKey();
+
     if (!dest.enabled && wasEnabled) {
       existing.stopped = true;
       this.stopRelay(existing, "disabled");
     } else if (dest.enabled && !wasEnabled) {
       existing.stopped = false;
       existing.restartCount = 0;
-      if (this.streamActive) {
-        this.startRelay(existing);
+      if (pullKey) {
+        this.startRelay(existing, pullKey);
       }
-    } else if (dest.enabled && (urlChanged || backendChanged) && this.streamActive) {
+    } else if (dest.enabled && (urlChanged || backendChanged) && pullKey) {
       this.stopRelay(existing, "config_changed");
       existing.restartCount = 0;
-      setTimeout(() => this.startRelay(existing), 500);
+      setTimeout(() => this.startRelay(existing, pullKey!), 500);
     }
   }
 
@@ -195,6 +373,12 @@ export class RelayManager {
   }
 
   stopAll(): void {
+    this.clearSlateGraceTimer();
+    this.clearSlateSettleTimer();
+    this.bumpSlateInjectorSession();
+    this.slateInjector.stop();
+    this.slateMode = false;
+
     this.pushing = false;
     for (const [, relay] of this.relays) {
       relay.stopped = true;
@@ -207,19 +391,20 @@ export class RelayManager {
     return `${base}${dest.streamKey}`;
   }
 
-  private startRelay(relay: RelayProcess): void {
+  private startRelay(relay: RelayProcess, pullStreamKey?: string): void {
     if (relay.relay || relay.stopped) return;
 
-    if (!this.activeStreamKey) {
+    const key = pullStreamKey ?? this.effectivePullStreamKey();
+    if (!key) {
       relay.status = "idle";
       this.callbacks.onDebugLog?.(
         "relay-manager",
-        `Cannot start relay for ${relay.destination.name}: no active stream key`
+        `Cannot start relay for ${relay.destination.name}: no ingest stream key`
       );
       return;
     }
 
-    const inputUrl = `rtmp://127.0.0.1:${this.ingestPort}/live/${this.activeStreamKey}`;
+    const inputUrl = `rtmp://127.0.0.1:${this.ingestPort}/live/${key}`;
     const outputUrl = this.buildRtmpUrl(relay.destination);
     const useFfmpeg = relay.destination.useFfmpeg === true;
 
@@ -236,7 +421,7 @@ export class RelayManager {
           relay.status = "idle";
           return;
         }
-        if (this.streamActive && this.pushing) {
+        if (this.ingestRecoverable() && this.pushing) {
           relay.status = "error";
           relay.error = `Relay stopped: ${reason}`;
           relay.restartCount++;
@@ -253,7 +438,7 @@ export class RelayManager {
         relay.status = "error";
         relay.error = error;
         this.callbacks.onRelayError(relay.destination.id, error);
-        if (!relay.stopped && this.streamActive && this.pushing) {
+        if (!relay.stopped && this.ingestRecoverable() && this.pushing) {
           relay.restartCount++;
           this.scheduleRestart(relay);
         }
@@ -313,7 +498,8 @@ export class RelayManager {
   }
 
   private scheduleRestart(relay: RelayProcess): void {
-    if (relay.stopped || !this.streamActive || !this.pushing) return;
+    const pullKey = this.effectivePullStreamKey();
+    if (relay.stopped || !this.pushing || !pullKey) return;
 
     if (relay.restartCount >= MAX_RESTARTS) {
       relay.status = "error";
@@ -338,8 +524,15 @@ export class RelayManager {
 
     relay.restartTimer = setTimeout(() => {
       relay.restartTimer = null;
-      if (!relay.stopped && this.streamActive && relay.destination.enabled && this.pushing) {
-        this.startRelay(relay);
+      const key = this.effectivePullStreamKey();
+      if (
+        !relay.stopped &&
+        relay.destination.enabled &&
+        this.pushing &&
+        key &&
+        this.ingestRecoverable()
+      ) {
+        this.startRelay(relay, key);
       }
     }, delay);
   }

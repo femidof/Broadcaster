@@ -5,8 +5,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import type { ProfileStatus } from "@/lib/types";
+import {
+  type ProfileStatus,
+  type StreamFallbackSlate,
+  SLATE_GRACE_PERIOD_MS_DEFAULT,
+  SLATE_GRACE_PERIOD_MS_MAX,
+  SLATE_GRACE_PERIOD_MS_MIN,
+  SLATE_RTMP_STREAM_KEY,
+} from "@/lib/types";
 import { getVersion } from "@tauri-apps/api/app";
+import { open } from "@tauri-apps/plugin-dialog";
 
 interface SettingsPanelProps {
   selectedProfile: ProfileStatus | null;
@@ -15,9 +23,152 @@ interface SettingsPanelProps {
   onPortChange: (port: number) => void;
   onAutoStartChange: (autoStart: boolean) => void;
   onDeleteProfile: () => void;
+  onStreamFallbackSlateChange: (slate: StreamFallbackSlate) => void;
   debugMode: boolean;
   onDebugModeChange: (enabled: boolean) => void;
   onCheckUpdates: () => void;
+}
+
+function clampGraceMs(n: number): number {
+  return Math.min(
+    SLATE_GRACE_PERIOD_MS_MAX,
+    Math.max(SLATE_GRACE_PERIOD_MS_MIN, Math.round(n))
+  );
+}
+
+function StreamFallbackCard({
+  slate,
+  onChange,
+}: {
+  slate: StreamFallbackSlate | undefined;
+  onChange: (next: StreamFallbackSlate) => void;
+}) {
+  const effective: StreamFallbackSlate =
+    slate ?? {
+      enabled: false,
+      mediaPath: "",
+      gracePeriodMs: SLATE_GRACE_PERIOD_MS_DEFAULT,
+    };
+
+  const [graceDraft, setGraceDraft] = useState(() =>
+    String(slate?.gracePeriodMs ?? SLATE_GRACE_PERIOD_MS_DEFAULT)
+  );
+
+  async function handleBrowse() {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [
+          {
+            name: "Image or video",
+            extensions: [
+              "png",
+              "jpg",
+              "jpeg",
+              "webp",
+              "gif",
+              "mp4",
+              "mov",
+              "mkv",
+              "webm",
+              "m4v",
+            ],
+          },
+        ],
+      });
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      if (typeof path === "string" && path.length > 0) {
+        onChange({
+          ...effective,
+          enabled: true,
+          mediaPath: path,
+        });
+      }
+    } catch {
+      /* dialog unavailable outside Tauri */
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Stream fallback slate</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5 flex-1 min-w-0">
+            <Label>Enable fallback when OBS disconnects</Label>
+            <p className="text-xs text-muted-foreground">
+              After the grace period, Broadcaster publishes your chosen image or video to local ingest
+              so relays stay live until OBS reconnects (only while you are already pushing).
+            </p>
+          </div>
+          <Switch
+            checked={effective.enabled}
+            onCheckedChange={(checked) =>
+              onChange({
+                ...effective,
+                enabled: checked,
+              })
+            }
+          />
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5 flex-1 min-w-0">
+            <Label>Grace period (ms)</Label>
+            <p className="text-xs text-muted-foreground">
+              Wait this long after OBS stops before starting fallback ({SLATE_GRACE_PERIOD_MS_MIN}–
+              {SLATE_GRACE_PERIOD_MS_MAX} ms). Brief drops may reconnect without slate.
+            </p>
+          </div>
+          <Input
+            className="w-28 text-right tabular-nums"
+            type="number"
+            min={SLATE_GRACE_PERIOD_MS_MIN}
+            max={SLATE_GRACE_PERIOD_MS_MAX}
+            value={graceDraft}
+            onChange={(e) => setGraceDraft(e.target.value)}
+            onBlur={() => {
+              const parsed = parseInt(graceDraft, 10);
+              const next = clampGraceMs(
+                Number.isNaN(parsed) ? effective.gracePeriodMs : parsed
+              );
+              setGraceDraft(String(next));
+              if (next !== effective.gracePeriodMs) {
+                onChange({ ...effective, gracePeriodMs: next });
+              }
+            }}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label>Fallback media file</Label>
+          <div className="flex gap-2">
+            <Input
+              className="font-mono text-xs flex-1 min-w-0"
+              readOnly
+              placeholder="Pick an image or video file…"
+              value={effective.mediaPath}
+            />
+            <Button type="button" variant="secondary" size="sm" onClick={() => void handleBrowse()}>
+              Browse…
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Still images (PNG, JPG, …) or video (MP4, MOV, …). Uses bundled FFmpeg to encode for RTMP.
+          </p>
+        </div>
+
+        <p className="text-xs text-amber-700 dark:text-amber-400 border border-amber-500/30 rounded-md p-2 bg-amber-500/5">
+          <strong className="text-foreground">Reserved stream key:</strong> Do not set your encoder
+          stream key to{" "}
+          <code className="rounded bg-muted px-1 font-mono">{SLATE_RTMP_STREAM_KEY}</code> — Broadcaster
+          uses it internally for fallback.
+        </p>
+      </CardContent>
+    </Card>
+  );
 }
 
 function ProfileSettingsFields({
@@ -137,11 +288,12 @@ export function SettingsPanel({
   onPortChange,
   onAutoStartChange,
   onDeleteProfile,
+  onStreamFallbackSlateChange,
   debugMode,
   onDebugModeChange,
   onCheckUpdates,
 }: SettingsPanelProps) {
-  const [appVersion, setAppVersion] = useState<string>("2.1.0");
+  const [appVersion, setAppVersion] = useState<string>("2.2.0");
 
   useEffect(() => {
     getVersion()
@@ -169,6 +321,12 @@ export function SettingsPanel({
         onPortChange={onPortChange}
         onAutoStartChange={onAutoStartChange}
         onDeleteProfile={onDeleteProfile}
+      />
+
+      <StreamFallbackCard
+        key={`slate-${selectedProfile.profileId}-${JSON.stringify(selectedProfile.streamFallbackSlate ?? null)}`}
+        slate={selectedProfile.streamFallbackSlate}
+        onChange={onStreamFallbackSlateChange}
       />
 
       <Card>
