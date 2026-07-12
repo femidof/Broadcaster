@@ -8,6 +8,9 @@ import {
   SLATE_GRACE_PERIOD_MS_DEFAULT,
   SLATE_GRACE_PERIOD_MS_MAX,
   SLATE_GRACE_PERIOD_MS_MIN,
+  SLATE_STOP_AFTER_MS_DEFAULT,
+  SLATE_STOP_AFTER_MS_MAX,
+  SLATE_STOP_AFTER_MS_MIN,
   StreamFallbackSlate,
 } from "./types";
 
@@ -56,6 +59,14 @@ function clampGracePeriodMs(value: unknown): number {
   return Math.min(SLATE_GRACE_PERIOD_MS_MAX, Math.max(SLATE_GRACE_PERIOD_MS_MIN, n));
 }
 
+function clampStopAfterMs(value: unknown): number {
+  const n =
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.round(value)
+      : SLATE_STOP_AFTER_MS_DEFAULT;
+  return Math.min(SLATE_STOP_AFTER_MS_MAX, Math.max(SLATE_STOP_AFTER_MS_MIN, n));
+}
+
 function parseStreamFallbackSlate(raw: unknown): StreamFallbackSlate | undefined {
   if (raw === undefined || raw === null) return undefined;
   if (!raw || typeof raw !== "object") return undefined;
@@ -64,13 +75,19 @@ function parseStreamFallbackSlate(raw: unknown): StreamFallbackSlate | undefined
   const mediaPath =
     typeof o.mediaPath === "string" ? o.mediaPath.trim() : "";
   const gracePeriodMs = clampGracePeriodMs(o.gracePeriodMs);
+  const sourceMode: StreamFallbackSlate["sourceMode"] =
+    o.sourceMode === "last_frame_then_slate" ? "last_frame_then_slate" : "slate_only";
+  const durationMode: StreamFallbackSlate["durationMode"] =
+    o.durationMode === "stop_after" ? "stop_after" : "indefinite";
+  const stopAfterMs = clampStopAfterMs(o.stopAfterMs);
+
   if (!enabled) {
-    return { enabled: false, mediaPath: "", gracePeriodMs };
+    return { enabled: false, mediaPath: "", gracePeriodMs, sourceMode, durationMode, stopAfterMs };
   }
   if (mediaPath.length === 0) {
-    return { enabled: false, mediaPath: "", gracePeriodMs };
+    return { enabled: false, mediaPath: "", gracePeriodMs, sourceMode, durationMode, stopAfterMs };
   }
-  return { enabled: true, mediaPath, gracePeriodMs };
+  return { enabled: true, mediaPath, gracePeriodMs, sourceMode, durationMode, stopAfterMs };
 }
 
 function normalizeDestination(d: Destination): Destination {

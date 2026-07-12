@@ -71,7 +71,7 @@ export class FfmpegRelay {
   private process: FfmpegProcess | null = null;
   private running = false;
   private starting = false;
-  private readonly inputUrl: string;
+  private inputUrl: string;
   private readonly outputUrl: string;
   private readonly name: string;
   private readonly customArgs?: string;
@@ -80,6 +80,7 @@ export class FfmpegRelay {
   private lastStderrTail: string[] = [];
   private latestBitrateKbps = 0;
   private stopRequested = false;
+  private switchingInput = false;
   private killTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -183,6 +184,15 @@ export class FfmpegRelay {
         this.killTimer = null;
       }
 
+      if (this.switchingInput) {
+        this.switchingInput = false;
+        this.stopRequested = false;
+        this.starting = false;
+        // Restart immediately with the updated inputUrl
+        setTimeout(() => this.start(), 200);
+        return;
+      }
+
       if (this.stopRequested) {
         this.callbacks.onStopped("stopped");
         return;
@@ -199,6 +209,27 @@ export class FfmpegRelay {
         this.callbacks.onError(`${reason}${suffix}`);
       }
     });
+  }
+
+  /**
+   * Swap the input URL and restart FFmpeg. Unlike DirectRelay, FFmpeg has no
+   * persistent publish socket, so the remote connection will briefly drop and
+   * reconnect. This is best-effort for FFmpeg destinations.
+   */
+  switchInput(newInputUrl: string): void {
+    this.callbacks.onDebugLog(`[switchInput] Restarting FFmpeg with new input`);
+    this.inputUrl = newInputUrl;
+    if (!this.running && !this.starting) return;
+    this.switchingInput = true;
+    try {
+      this.process?.kill("SIGTERM");
+    } catch { /* ignore */ }
+    if (this.killTimer) clearTimeout(this.killTimer);
+    this.killTimer = setTimeout(() => {
+      if (this.process && !this.process.killed) {
+        try { this.process.kill("SIGKILL"); } catch { /* ignore */ }
+      }
+    }, SIGKILL_TIMEOUT_MS);
   }
 
   stop(): void {

@@ -7,6 +7,10 @@ interface RelayBackend {
   start(): void;
   stop(): void;
   getStats(): { bitrateKbps: number };
+  /** Swap pull source without closing the publish socket (native only; FFmpeg restarts). */
+  switchInput?(newInputUrl: string): void;
+  /** Loop last cached keyframe on the publisher while the new source warms up (native only). */
+  holdLastFrame?(fps?: number): void;
 }
 
 interface RelayProcess {
@@ -30,6 +34,7 @@ export interface RelayManagerCallbacks {
 const MAX_RESTARTS = 5;
 const BASE_RESTART_DELAY_MS = 5_000;
 const MAX_RESTART_DELAY_MS = 60_000;
+/** Ms to wait after slate injector launches before switching relays to it. */
 const SLATE_INJECTOR_SETTLE_MS = 800;
 
 export class RelayManager {
@@ -43,8 +48,12 @@ export class RelayManager {
   /** Relays are pulling slate FFmpeg publisher. */
   private slateMode = false;
   private slateInjector = new SlateInjector();
+  /** Debounce / hold-last-frame timer before switching to slate. */
   private slateGraceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Settle wait after slate injector launches. */
   private slateInjectorSettleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Stop-after duration timer. Fires stopPushing() when timed limit is reached. */
+  private fallbackDurationTimer: ReturnType<typeof setTimeout> | null = null;
   /** Bumped when intentionally stopping/replacing slate FFmpeg — ignores stale process exits. */
   private slateInjectorSessionId = 0;
   private slateConfig: StreamFallbackSlate | undefined;
@@ -86,6 +95,13 @@ export class RelayManager {
     }
   }
 
+  private clearFallbackDurationTimer(): void {
+    if (this.fallbackDurationTimer) {
+      clearTimeout(this.fallbackDurationTimer);
+      this.fallbackDurationTimer = null;
+    }
+  }
+
   private bumpSlateInjectorSession(): void {
     this.slateInjectorSessionId++;
   }
@@ -104,26 +120,6 @@ export class RelayManager {
     return !!(s?.enabled && s.mediaPath.trim().length > 0);
   }
 
-  private haltRelays(reason: string): void {
-    for (const [, relay] of this.relays) {
-      this.stopRelay(relay, reason);
-    }
-  }
-
-  private restartRelaysForStreamKey(streamKey: string): void {
-    this.callbacks.onDebugLog?.(
-      "relay-manager",
-      `Restarting relays for ingest key ${streamKey}`
-    );
-    for (const [, relay] of this.relays) {
-      if (!relay.destination.enabled || relay.stopped) continue;
-      if (relay.relay) this.stopRelay(relay, "input_swap");
-      relay.restartCount = 0;
-      relay.error = undefined;
-      this.startRelay(relay, streamKey);
-    }
-  }
-
   private needsRelayResume(): boolean {
     for (const [, r] of this.relays) {
       if (!r.destination.enabled || r.stopped) continue;
@@ -132,20 +128,44 @@ export class RelayManager {
     return false;
   }
 
-  private onSlateGraceElapsed(): void {
-    this.slateGraceTimer = null;
-    if (!this.pushing || this.obsConnected) return;
-
-    const slate = this.slateConfig;
-    if (!slate?.enabled || !slate.mediaPath.trim()) {
-      this.callbacks.onDebugLog?.(
-        "relay-manager",
-        "Slate grace elapsed but slate disabled — stopping push"
-      );
-      this.stopPushing();
-      return;
+  /**
+   * Switch every live relay's pull source to `streamKey` without touching the
+   * publish socket. If a relay has no backend yet (e.g. it errored out), start
+   * it fresh. This is the core of the persistent-keepalive mechanism.
+   */
+  private switchAllRelaysToKey(streamKey: string): void {
+    this.callbacks.onDebugLog?.(
+      "relay-manager",
+      `Switching all relays to ingest key: ${streamKey}`
+    );
+    const inputUrl = `rtmp://127.0.0.1:${this.ingestPort}/live/${streamKey}`;
+    for (const [, relay] of this.relays) {
+      if (!relay.destination.enabled || relay.stopped) continue;
+      if (relay.relay?.switchInput) {
+        relay.relay.switchInput(inputUrl);
+      } else if (relay.relay) {
+        // Backend doesn't support switchInput (shouldn't happen) — fall back to restart
+        this.stopRelay(relay, "input_swap");
+        relay.restartCount = 0;
+        relay.error = undefined;
+        this.startRelay(relay, streamKey);
+      } else {
+        // No running relay (errored/never started) — start fresh
+        relay.restartCount = 0;
+        relay.error = undefined;
+        this.startRelay(relay, streamKey);
+      }
     }
+  }
 
+  /**
+   * Start the slate injector, then after the settle window call `onReady`.
+   * Returns false if the injector fails to launch.
+   */
+  private launchSlateInjector(
+    slate: StreamFallbackSlate,
+    onReady: () => void
+  ): void {
     this.clearSlateSettleTimer();
     this.bumpSlateInjectorSession();
     this.slateInjector.stop();
@@ -169,7 +189,7 @@ export class RelayManager {
     });
 
     if (!started) {
-      this.callbacks.onDebugLog?.("relay-manager", "Slate injector failed to start");
+      this.callbacks.onDebugLog?.("relay-manager", "Slate injector failed to start — stopping push");
       this.stopPushing();
       return;
     }
@@ -181,15 +201,39 @@ export class RelayManager {
         this.slateInjector.stop();
         return;
       }
-      this.slateMode = true;
-      this.restartRelaysForStreamKey(SLATE_RTMP_STREAM_KEY);
+      onReady();
     }, SLATE_INJECTOR_SETTLE_MS);
+  }
+
+  /**
+   * Start the stop-after timer (only when durationMode === "stop_after").
+   * When it fires and OBS is still disconnected, stopPushing() is called.
+   */
+  private startFallbackDurationTimer(slate: StreamFallbackSlate): void {
+    this.clearFallbackDurationTimer();
+    if (slate.durationMode !== "stop_after") return;
+    const ms = slate.stopAfterMs > 0 ? slate.stopAfterMs : 300_000;
+    this.callbacks.onDebugLog?.(
+      "relay-manager",
+      `Fallback duration timer: stop after ${ms / 1000}s`
+    );
+    this.fallbackDurationTimer = setTimeout(() => {
+      this.fallbackDurationTimer = null;
+      if (this.pushing && this.slateMode && !this.obsConnected) {
+        this.callbacks.onDebugLog?.(
+          "relay-manager",
+          `Fallback duration limit reached (${ms / 1000}s) — stopping push`
+        );
+        this.stopPushing();
+      }
+    }, ms);
   }
 
   onStreamConnect(streamKey: string): void {
     if (streamKey === SLATE_RTMP_STREAM_KEY) return;
 
     this.clearSlateGraceTimer();
+    this.clearFallbackDurationTimer();
 
     this.obsConnected = true;
     this.obsStreamKey = streamKey;
@@ -205,12 +249,13 @@ export class RelayManager {
       this.bumpSlateInjectorSession();
       this.slateMode = false;
       this.slateInjector.stop();
-      this.restartRelaysForStreamKey(streamKey);
+      // Switch all relays back to OBS — publisher stays open
+      this.switchAllRelaysToKey(streamKey);
       return;
     }
 
     if (this.needsRelayResume()) {
-      this.restartRelaysForStreamKey(streamKey);
+      this.switchAllRelaysToKey(streamKey);
     }
   }
 
@@ -230,16 +275,75 @@ export class RelayManager {
 
     if (!this.pushing) return;
 
-    if (this.slateEligible()) {
-      this.callbacks.onDebugLog?.(
-        "relay-manager",
-        "OBS disconnected — halting relays for slate fallback grace period"
-      );
+    const slate = this.slateConfig;
+    if (this.slateEligible() && slate) {
       this.clearSlateGraceTimer();
       this.clearSlateSettleTimer();
-      this.haltRelays("obs_disconnected");
-      const delay = Math.max(0, this.slateConfig!.gracePeriodMs);
-      this.slateGraceTimer = setTimeout(() => this.onSlateGraceElapsed(), delay);
+
+      if (slate.sourceMode === "last_frame_then_slate") {
+        // Hold the last cached keyframe on all live native relays to keep the
+        // publisher socket alive and media flowing while the slate warms up.
+        this.callbacks.onDebugLog?.(
+          "relay-manager",
+          `OBS disconnected — holding last frame for ${slate.gracePeriodMs}ms then switching to slate`
+        );
+        for (const [, relay] of this.relays) {
+          if (!relay.destination.enabled || relay.stopped) continue;
+          relay.relay?.holdLastFrame?.();
+        }
+        // Immediately start the slate injector in the background so it's ready
+        // when the hold window expires
+        const sessionAtLaunch = this.slateInjectorSessionId + 1; // will be bumped in launchSlateInjector
+        void sessionAtLaunch; // suppress lint
+
+        // Start injector but delay the relay switch until after gracePeriodMs
+        this.bumpSlateInjectorSession();
+        this.slateInjector.stop();
+        const sId = this.slateInjectorSessionId;
+        const started = this.slateInjector.start(this.ingestPort, slate.mediaPath, {
+          onExit: (code, signal) => {
+            if (sId !== this.slateInjectorSessionId) return;
+            this.callbacks.onDebugLog?.(
+              "relay-manager",
+              `Slate injector exited code=${code} signal=${signal ?? "none"}`
+            );
+            if (!this.pushing || this.obsConnected) return;
+            this.callbacks.onDebugLog?.(
+              "relay-manager",
+              "Slate FFmpeg stopped while fallback active — stopping push"
+            );
+            this.stopPushing();
+          },
+          onDebugLog: (msg) => this.callbacks.onDebugLog?.("slate-injector", msg),
+        });
+        if (!started) {
+          this.callbacks.onDebugLog?.("relay-manager", "Slate injector failed to start — stopping push");
+          this.stopPushing();
+          return;
+        }
+
+        const graceDelay = Math.max(0, slate.gracePeriodMs);
+        this.slateGraceTimer = setTimeout(() => {
+          this.slateGraceTimer = null;
+          if (!this.pushing || this.obsConnected) return;
+          this.slateMode = true;
+          this.switchAllRelaysToKey(SLATE_RTMP_STREAM_KEY);
+          this.startFallbackDurationTimer(slate);
+        }, graceDelay);
+
+      } else {
+        // slate_only: switch immediately, with a short settle for slate FFmpeg to start
+        this.callbacks.onDebugLog?.(
+          "relay-manager",
+          "OBS disconnected — launching slate injector (slate_only mode)"
+        );
+        this.launchSlateInjector(slate, () => {
+          if (!this.pushing || this.obsConnected) return;
+          this.slateMode = true;
+          this.switchAllRelaysToKey(SLATE_RTMP_STREAM_KEY);
+          this.startFallbackDurationTimer(slate);
+        });
+      }
       return;
     }
 
@@ -275,6 +379,7 @@ export class RelayManager {
   stopPushing(): void {
     this.clearSlateGraceTimer();
     this.clearSlateSettleTimer();
+    this.clearFallbackDurationTimer();
     this.bumpSlateInjectorSession();
     this.slateInjector.stop();
     this.slateMode = false;
@@ -375,6 +480,7 @@ export class RelayManager {
   stopAll(): void {
     this.clearSlateGraceTimer();
     this.clearSlateSettleTimer();
+    this.clearFallbackDurationTimer();
     this.bumpSlateInjectorSession();
     this.slateInjector.stop();
     this.slateMode = false;
@@ -440,6 +546,39 @@ export class RelayManager {
         this.callbacks.onRelayError(relay.destination.id, error);
         if (!relay.stopped && this.ingestRecoverable() && this.pushing) {
           relay.restartCount++;
+          this.scheduleRestart(relay);
+        }
+      },
+      /**
+       * Pull-side failure with publisher still alive (native relay only).
+       * The publisher is kept open; we schedule a full restart only if the ingest
+       * is recoverable. In practice this fires during unexpected pull drops — the
+       * normal OBS→slate transition bumps pullSessionId first so this won't fire.
+       */
+      onPullFailed: (reason: string) => {
+        relay.bitrateKbps = 0;
+        if (relay.stopped || !this.pushing) {
+          relay.status = "idle";
+          // Backend still has a live publisher; stop it cleanly
+          const b = relay.relay;
+          relay.relay = null;
+          try { b?.stop(); } catch { /* ignore */ }
+          return;
+        }
+        this.callbacks.onDebugLog?.(
+          `relay:${relay.destination.name}`,
+          `Pull failed (${reason}) — scheduling relay restart`
+        );
+        relay.status = "error";
+        relay.error = `Pull failed: ${reason}`;
+        relay.restartCount++;
+        this.callbacks.onRelayError(relay.destination.id, relay.error);
+        if (this.ingestRecoverable()) {
+          // Stop the whole backend (publisher included) then let scheduleRestart
+          // create a fresh relay — this re-establishes the remote connection.
+          const b = relay.relay;
+          relay.relay = null;
+          try { b?.stop(); } catch { /* ignore */ }
           this.scheduleRestart(relay);
         }
       },

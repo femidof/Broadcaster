@@ -28,7 +28,10 @@ pub struct Destination {
 pub struct StreamFallbackSlate {
     pub enabled: bool,
     pub media_path: String,
+    pub source_mode: String,
     pub grace_period_ms: u32,
+    pub duration_mode: String,
+    pub stop_after_ms: u32,
 }
 
 impl Default for StreamFallbackSlate {
@@ -36,7 +39,10 @@ impl Default for StreamFallbackSlate {
         Self {
             enabled: false,
             media_path: String::new(),
+            source_mode: "slate_only".to_string(),
             grace_period_ms: 2000,
+            duration_mode: "indefinite".to_string(),
+            stop_after_ms: 300_000,
         }
     }
 }

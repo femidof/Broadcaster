@@ -511,7 +511,7 @@ export default function App() {
     }
   }
 
-  async function handleStreamFallbackSlateChange(slate: StreamFallbackSlate) {
+  async function handleStreamFallbackSlateChange(slate: StreamFallbackSlate): Promise<void> {
     if (!selectedProfile) return;
     try {
       await api.updateProfile(
@@ -521,6 +521,7 @@ export default function App() {
       const msg = `Failed to update stream fallback: ${toErrorMessage(e)}`;
       console.error(msg, e);
       pushDebugLog("ui", msg, "error");
+      throw e;
     }
   }
 

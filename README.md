@@ -7,7 +7,7 @@
   </table>
 </div>
 
-**Current version:** **2.2.0**
+**Current version:** **2.2.1**
 
 A lightweight desktop multistream relay app. Stream to Twitch, YouTube, Facebook Live, Instagram Live, TikTok Live, Trovo, Kick, Restream, BIGO LIVE, and custom RTMP destinations simultaneously. **Version 2** adds **profiles**: multiple named setups, each with its own local RTMP port and destination list, so you can run several ingest servers at once (for example backup or split distribution).
 

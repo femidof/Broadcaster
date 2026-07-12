@@ -37,12 +37,29 @@ export const SLATE_RTMP_STREAM_KEY = "_bc_slate";
 export interface StreamFallbackSlate {
   enabled: boolean;
   mediaPath: string;
+  /**
+   * slate_only: switch immediately to slate (debounce window).
+   * last_frame_then_slate: loop last cached keyframe for this duration then switch to slate.
+   */
+  sourceMode: "slate_only" | "last_frame_then_slate";
+  /**
+   * Ms to debounce before switching to slate (slate_only) or hold last frame
+   * before switching to slate (last_frame_then_slate).
+   */
   gracePeriodMs: number;
+  /** indefinite: keep slate until OBS returns. stop_after: stop pushing after stopAfterMs. */
+  durationMode: "indefinite" | "stop_after";
+  /** Only used when durationMode = "stop_after". Default 300 000 ms (5 min). */
+  stopAfterMs: number;
 }
 
 export const SLATE_GRACE_PERIOD_MS_DEFAULT = 2000;
 export const SLATE_GRACE_PERIOD_MS_MIN = 0;
 export const SLATE_GRACE_PERIOD_MS_MAX = 60000;
+
+export const SLATE_STOP_AFTER_MS_DEFAULT = 300_000;
+export const SLATE_STOP_AFTER_MS_MIN = 30_000;
+export const SLATE_STOP_AFTER_MS_MAX = 3_600_000;
 
 export interface Profile {
   id: string;

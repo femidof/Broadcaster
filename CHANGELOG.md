@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Stream connect/disconnect UI state refreshes from the sidecar status after ingest events so relay mode (including slate) stays accurate.
 
+## [2.2.1] - 2026-04-30
+
+### Added
+
+- **Persistent publish keepalive fallback**: Native RTMP relays keep destination publish sockets connected across OBS disconnects by switching only the pull source (OBS ↔ internal slate), preventing platforms from immediately ending the broadcast session.
+- **Hold last frame → slate**: Optional mode that briefly loops the last cached keyframe/audio while the slate starts, smoothing transitions.
+- **Timed stop**: Optional “stop after N minutes” fallback duration that stops pushing entirely if OBS stays offline (default 5 minutes).
+
+### Changed
+
+- Settings UI now includes fallback source mode and duration mode controls; dashboard wording now reflects “fallback active” keepalive behavior.
+
 ## [2.1.0] - 2026-04-17
 
 ### Added

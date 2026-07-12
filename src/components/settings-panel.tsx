@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { RefreshCw, Trash2, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +12,9 @@ import {
   SLATE_GRACE_PERIOD_MS_MAX,
   SLATE_GRACE_PERIOD_MS_MIN,
   SLATE_RTMP_STREAM_KEY,
+  SLATE_STOP_AFTER_MS_DEFAULT,
+  SLATE_STOP_AFTER_MS_MAX,
+  SLATE_STOP_AFTER_MS_MIN,
 } from "@/lib/types";
 import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -23,7 +26,7 @@ interface SettingsPanelProps {
   onPortChange: (port: number) => void;
   onAutoStartChange: (autoStart: boolean) => void;
   onDeleteProfile: () => void;
-  onStreamFallbackSlateChange: (slate: StreamFallbackSlate) => void;
+  onStreamFallbackSlateChange: (slate: StreamFallbackSlate) => Promise<void>;
   debugMode: boolean;
   onDebugModeChange: (enabled: boolean) => void;
   onCheckUpdates: () => void;
@@ -36,23 +39,82 @@ function clampGraceMs(n: number): number {
   );
 }
 
+function clampStopAfterMs(n: number): number {
+  return Math.min(
+    SLATE_STOP_AFTER_MS_MAX,
+    Math.max(SLATE_STOP_AFTER_MS_MIN, Math.round(n))
+  );
+}
+
+function msToMinutes(ms: number): number {
+  return Math.max(1, Math.round(ms / 60_000));
+}
+
+function minutesToMs(m: number): number {
+  return m * 60_000;
+}
+
 function StreamFallbackCard({
   slate,
   onChange,
 }: {
   slate: StreamFallbackSlate | undefined;
-  onChange: (next: StreamFallbackSlate) => void;
+  onChange: (next: StreamFallbackSlate) => Promise<void>;
 }) {
-  const effective: StreamFallbackSlate =
-    slate ?? {
-      enabled: false,
-      mediaPath: "",
-      gracePeriodMs: SLATE_GRACE_PERIOD_MS_DEFAULT,
-    };
+  const defaults: StreamFallbackSlate = {
+    enabled: false,
+    mediaPath: "",
+    sourceMode: "slate_only",
+    gracePeriodMs: SLATE_GRACE_PERIOD_MS_DEFAULT,
+    durationMode: "indefinite",
+    stopAfterMs: SLATE_STOP_AFTER_MS_DEFAULT,
+  };
+  const effective = slate ?? defaults;
 
+  const [draft, setDraft] = useState<StreamFallbackSlate>(effective);
   const [graceDraft, setGraceDraft] = useState(() =>
-    String(slate?.gracePeriodMs ?? SLATE_GRACE_PERIOD_MS_DEFAULT)
+    String(effective.gracePeriodMs ?? SLATE_GRACE_PERIOD_MS_DEFAULT)
   );
+  const [stopMinutesDraft, setStopMinutesDraft] = useState(() =>
+    String(msToMinutes(effective.stopAfterMs ?? SLATE_STOP_AFTER_MS_DEFAULT))
+  );
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const commitIdRef = useRef(0);
+
+  // Keep draft in sync with external changes (e.g. sidecar status refresh)
+  useEffect(() => {
+    setDraft(effective);
+    setGraceDraft(String(effective.gracePeriodMs ?? SLATE_GRACE_PERIOD_MS_DEFAULT));
+    setStopMinutesDraft(String(msToMinutes(effective.stopAfterMs ?? SLATE_STOP_AFTER_MS_DEFAULT)));
+    // Don't reset savedAt/saveError here — those are UX signals about user actions
+    // and will be overwritten by the next commit result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slate?.enabled, slate?.mediaPath, slate?.sourceMode, slate?.gracePeriodMs, slate?.durationMode, slate?.stopAfterMs]);
+
+  async function commit(next: StreamFallbackSlate) {
+    setDraft(next);
+    setSaving(true);
+    setSaveError(null);
+    const id = ++commitIdRef.current;
+    try {
+      await onChange(next);
+      if (id === commitIdRef.current) {
+        setSavedAt(Date.now());
+      }
+    } catch (e) {
+      if (id === commitIdRef.current) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setSaveError(msg);
+      }
+    } finally {
+      if (id === commitIdRef.current) {
+        setSaving(false);
+      }
+    }
+  }
 
   async function handleBrowse() {
     try {
@@ -62,103 +124,239 @@ function StreamFallbackCard({
           {
             name: "Image or video",
             extensions: [
-              "png",
-              "jpg",
-              "jpeg",
-              "webp",
-              "gif",
-              "mp4",
-              "mov",
-              "mkv",
-              "webm",
-              "m4v",
+              "png", "jpg", "jpeg", "webp", "gif",
+              "mp4", "mov", "mkv", "webm", "m4v",
             ],
           },
         ],
       });
       const path = Array.isArray(selected) ? selected[0] : selected;
       if (typeof path === "string" && path.length > 0) {
-        onChange({
-          ...effective,
-          enabled: true,
-          mediaPath: path,
-        });
+        await commit({ ...draft, enabled: true, mediaPath: path });
       }
     } catch {
       /* dialog unavailable outside Tauri */
     }
   }
 
+  const graceLabel =
+    draft.sourceMode === "last_frame_then_slate"
+      ? "Hold-last-frame duration (ms)"
+      : "Debounce before slate (ms)";
+
+  const graceHint =
+    draft.sourceMode === "last_frame_then_slate"
+      ? `How long to loop the last cached keyframe before switching to slate (${SLATE_GRACE_PERIOD_MS_MIN}–${SLATE_GRACE_PERIOD_MS_MAX} ms).`
+      : `Short wait after OBS stops before activating slate (${SLATE_GRACE_PERIOD_MS_MIN}–${SLATE_GRACE_PERIOD_MS_MAX} ms). Set to 0 to switch immediately.`;
+
+  const eligible = draft.enabled && draft.mediaPath.trim().length > 0;
+
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">Stream fallback slate</CardTitle>
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="text-base">Stream fallback keepalive</CardTitle>
+          <div className="text-xs text-muted-foreground">
+            {saving ? "Saving…" : savedAt ? "Saved" : null}
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="rounded-md border bg-muted/30 p-3">
+          <p className="text-sm font-medium">How to use fallback (quick)</p>
+          <ol className="mt-1 list-decimal pl-4 text-xs text-muted-foreground space-y-1">
+            <li>Pick a fallback media file and enable fallback below.</li>
+            <li>Go live (push destinations) from the Dashboard.</li>
+            <li>When OBS disconnects, Broadcaster keeps platforms live and streams fallback.</li>
+          </ol>
+        </div>
+
+        {/* Enable toggle */}
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5 flex-1 min-w-0">
-            <Label>Enable fallback when OBS disconnects</Label>
+            <Label>Step 1 — Enable fallback when OBS disconnects</Label>
             <p className="text-xs text-muted-foreground">
-              After the grace period, Broadcaster publishes your chosen image or video to local ingest
-              so relays stay live until OBS reconnects (only while you are already pushing).
+              Keeps destination publish sockets live and streams fallback media
+              until OBS reconnects (only active while you are already pushing).
             </p>
           </div>
           <Switch
-            checked={effective.enabled}
-            onCheckedChange={(checked) =>
-              onChange({
-                ...effective,
-                enabled: checked,
-              })
-            }
+            checked={draft.enabled}
+            onCheckedChange={(checked) => void commit({ ...draft, enabled: checked })}
           />
         </div>
 
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5 flex-1 min-w-0">
-            <Label>Grace period (ms)</Label>
-            <p className="text-xs text-muted-foreground">
-              Wait this long after OBS stops before starting fallback ({SLATE_GRACE_PERIOD_MS_MIN}–
-              {SLATE_GRACE_PERIOD_MS_MAX} ms). Brief drops may reconnect without slate.
-            </p>
-          </div>
-          <Input
-            className="w-28 text-right tabular-nums"
-            type="number"
-            min={SLATE_GRACE_PERIOD_MS_MIN}
-            max={SLATE_GRACE_PERIOD_MS_MAX}
-            value={graceDraft}
-            onChange={(e) => setGraceDraft(e.target.value)}
-            onBlur={() => {
-              const parsed = parseInt(graceDraft, 10);
-              const next = clampGraceMs(
-                Number.isNaN(parsed) ? effective.gracePeriodMs : parsed
-              );
-              setGraceDraft(String(next));
-              if (next !== effective.gracePeriodMs) {
-                onChange({ ...effective, gracePeriodMs: next });
-              }
-            }}
-          />
-        </div>
-
+        {/* Fallback media file */}
         <div className="space-y-2">
-          <Label>Fallback media file</Label>
+          <Label>Step 2 — Pick fallback media</Label>
           <div className="flex gap-2">
             <Input
               className="font-mono text-xs flex-1 min-w-0"
               readOnly
               placeholder="Pick an image or video file…"
-              value={effective.mediaPath}
+              value={draft.mediaPath}
             />
             <Button type="button" variant="secondary" size="sm" onClick={() => void handleBrowse()}>
               Browse…
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Still images (PNG, JPG, …) or video (MP4, MOV, …). Uses bundled FFmpeg to encode for RTMP.
+            Still image (PNG, JPG …) or video (MP4, MOV …). Uses bundled FFmpeg to encode for RTMP.
           </p>
+          {!eligible ? (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              Choose a file and enable fallback to unlock the options below.
+            </p>
+          ) : null}
         </div>
+
+        {/* Source mode */}
+        <div className="space-y-2">
+          <Label>Step 3 — Choose fallback behavior</Label>
+          <div className="grid grid-cols-2 gap-2">
+            {(
+              [
+                {
+                  value: "slate_only" as const,
+                  label: "Slate only",
+                  hint: "Switch to the slate image/video immediately — simplest, most reliable",
+                },
+                {
+                  value: "last_frame_then_slate" as const,
+                  label: "Hold last frame → slate",
+                  hint: "Freeze on the last keyframe briefly while the slate warms up, then switch",
+                },
+              ] as const
+            ).map(({ value, label, hint }) => (
+              <button
+                key={value}
+                type="button"
+                disabled={!eligible || saving}
+                aria-disabled={!eligible || saving}
+                onClick={() => void commit({ ...draft, sourceMode: value })}
+                className={`rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                  draft.sourceMode === value
+                    ? "border-primary bg-primary/10 text-primary"
+                    : !eligible || saving
+                      ? "border-border opacity-50 cursor-not-allowed"
+                      : "border-border hover:border-primary/50"
+                }`}
+              >
+                <p className="font-medium">{label}</p>
+                <p className="text-muted-foreground mt-0.5">{hint}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Grace period */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5 flex-1 min-w-0">
+            <Label>{graceLabel}</Label>
+            <p className="text-xs text-muted-foreground">{graceHint}</p>
+          </div>
+          <Input
+            className="w-28 text-right tabular-nums"
+            type="number"
+            min={SLATE_GRACE_PERIOD_MS_MIN}
+            max={SLATE_GRACE_PERIOD_MS_MAX}
+            disabled={!eligible || saving}
+            value={graceDraft}
+            onChange={(e) => setGraceDraft(e.target.value)}
+            onBlur={() => {
+              const parsed = parseInt(graceDraft, 10);
+              const next = clampGraceMs(
+                Number.isNaN(parsed) ? draft.gracePeriodMs : parsed
+              );
+              setGraceDraft(String(next));
+              if (next !== draft.gracePeriodMs) {
+                void commit({ ...draft, gracePeriodMs: next });
+              }
+            }}
+          />
+        </div>
+
+        {/* Duration mode */}
+        <div className="space-y-2">
+          <Label>Fallback duration</Label>
+          <div className="grid grid-cols-2 gap-2">
+            {(
+              [
+                {
+                  value: "indefinite" as const,
+                  label: "Until OBS reconnects",
+                  hint: "Keep slate live as long as needed",
+                },
+                {
+                  value: "stop_after" as const,
+                  label: "Stop after N minutes",
+                  hint: "End the broadcast if OBS does not return in time",
+                },
+              ] as const
+            ).map(({ value, label, hint }) => (
+              <button
+                key={value}
+                type="button"
+                disabled={!eligible || saving}
+                aria-disabled={!eligible || saving}
+                onClick={() => void commit({ ...draft, durationMode: value })}
+                className={`rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                  draft.durationMode === value
+                    ? "border-primary bg-primary/10 text-primary"
+                    : !eligible || saving
+                      ? "border-border opacity-50 cursor-not-allowed"
+                      : "border-border hover:border-primary/50"
+                }`}
+              >
+                <p className="font-medium">{label}</p>
+                <p className="text-muted-foreground mt-0.5">{hint}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Stop-after minutes — only shown when stop_after is selected */}
+        {draft.durationMode === "stop_after" && (
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5 flex-1 min-w-0">
+              <Label>Stop after (minutes)</Label>
+              <p className="text-xs text-muted-foreground">
+                Broadcaster stops pushing entirely after this many minutes on
+                fallback ({Math.round(SLATE_STOP_AFTER_MS_MIN / 60_000)}–
+                {Math.round(SLATE_STOP_AFTER_MS_MAX / 60_000)} min).
+              </p>
+            </div>
+            <Input
+              className="w-24 text-right tabular-nums"
+              type="number"
+              min={Math.round(SLATE_STOP_AFTER_MS_MIN / 60_000)}
+              max={Math.round(SLATE_STOP_AFTER_MS_MAX / 60_000)}
+              disabled={!eligible || saving}
+              value={stopMinutesDraft}
+              onChange={(e) => setStopMinutesDraft(e.target.value)}
+              onBlur={() => {
+                const parsed = parseInt(stopMinutesDraft, 10);
+                const ms = clampStopAfterMs(
+                  minutesToMs(Number.isNaN(parsed) ? msToMinutes(draft.stopAfterMs) : parsed)
+                );
+                setStopMinutesDraft(String(msToMinutes(ms)));
+                if (ms !== draft.stopAfterMs) {
+                  void commit({ ...draft, stopAfterMs: ms });
+                }
+              }}
+            />
+          </div>
+        )}
+
+        {saveError ? (
+          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs">
+            <AlertCircle className="h-4 w-4 text-destructive mt-0.5" />
+            <div className="min-w-0">
+              <p className="font-medium text-destructive">Couldn’t save fallback settings</p>
+              <p className="text-muted-foreground break-words">{saveError}</p>
+            </div>
+          </div>
+        ) : null}
 
         <p className="text-xs text-amber-700 dark:text-amber-400 border border-amber-500/30 rounded-md p-2 bg-amber-500/5">
           <strong className="text-foreground">Reserved stream key:</strong> Do not set your encoder
@@ -293,7 +491,7 @@ export function SettingsPanel({
   onDebugModeChange,
   onCheckUpdates,
 }: SettingsPanelProps) {
-  const [appVersion, setAppVersion] = useState<string>("2.2.0");
+  const [appVersion, setAppVersion] = useState<string>("2.2.1");
 
   useEffect(() => {
     getVersion()
@@ -324,7 +522,6 @@ export function SettingsPanel({
       />
 
       <StreamFallbackCard
-        key={`slate-${selectedProfile.profileId}-${JSON.stringify(selectedProfile.streamFallbackSlate ?? null)}`}
         slate={selectedProfile.streamFallbackSlate}
         onChange={onStreamFallbackSlateChange}
       />

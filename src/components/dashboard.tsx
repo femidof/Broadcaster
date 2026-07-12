@@ -132,7 +132,7 @@ export function Dashboard({
                   <>
                     <Wifi className="h-4 w-4 text-amber-600 dark:text-amber-500" />
                     <span className="text-sm font-medium text-amber-700 dark:text-amber-400">
-                      Fallback slate
+                      Fallback active
                     </span>
                   </>
                 ) : (
@@ -156,7 +156,7 @@ export function Dashboard({
             <div>
               <p className="text-sm font-medium">
                 {status.pushing && status.slateActive && !status.streamActive
-                  ? "Fallback slate active — reconnect OBS"
+                  ? "Keepalive fallback active — reconnect OBS"
                   : status.pushing
                     ? "Streaming to destinations"
                     : status.streamActive
@@ -165,7 +165,7 @@ export function Dashboard({
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {status.pushing && status.slateActive && !status.streamActive
-                  ? `Still pushing to ${enabledDestinations.length} destination${enabledDestinations.length !== 1 ? "s" : ""} while OBS is offline`
+                  ? `Pushing fallback to ${enabledDestinations.length} destination${enabledDestinations.length !== 1 ? "s" : ""} — OBS offline`
                   : status.pushing
                     ? `Pushing to ${enabledDestinations.length} destination${enabledDestinations.length !== 1 ? "s" : ""}`
                     : !status.streamActive
