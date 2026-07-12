@@ -70,6 +70,7 @@ function main(): void {
       for (const dest of profile.destinations) {
         rm.addDestination(dest);
       }
+      rm.setStreamFallbackSlate(profile.streamFallbackSlate);
     }
 
     return rm;
@@ -121,6 +122,7 @@ function main(): void {
     if (!inst || !profile) return;
 
     inst.relayManager.setIngestPort(profile.port);
+    inst.relayManager.setStreamFallbackSlate(profile.streamFallbackSlate);
     const known = new Set(
       inst.relayManager.getStatuses().map((s) => s.destinationId)
     );
@@ -173,10 +175,12 @@ function main(): void {
       onStreamConnect: (streamKey) => {
         emit({ event: "stream_connected", profileId, streamKey });
         instances.get(profileId)?.relayManager.onStreamConnect(streamKey);
+        emitStatus();
       },
       onStreamDisconnect: (streamKey) => {
         emit({ event: "stream_disconnected", profileId, streamKey });
         instances.get(profileId)?.relayManager.onStreamDisconnect(streamKey);
+        emitStatus();
       },
       onDebugLog: (source, message) => {
         if (config.getDebugMode()) {
@@ -214,7 +218,8 @@ function main(): void {
     const inst = instances.get(profileId);
     const serverRunning = inst?.rtmpServer?.isRunning() ?? false;
     const streamActive = inst?.rtmpServer?.hasActiveStream() ?? false;
-    return {
+    const slateActive = inst?.relayManager.isSlateFallbackActive() ?? false;
+    const status: ProfileStatus = {
       profileId: profile.id,
       profileName: profile.name,
       port: profile.port,
@@ -222,9 +227,14 @@ function main(): void {
       serverRunning,
       streamActive,
       pushing: inst?.relayManager.isPushing() ?? false,
+      slateActive,
       relays: inst?.relayManager.getStatuses() ?? [],
       destinations: [...profile.destinations],
     };
+    if (profile.streamFallbackSlate !== undefined) {
+      status.streamFallbackSlate = { ...profile.streamFallbackSlate };
+    }
+    return status;
   }
 
   function emitStatus(): void {

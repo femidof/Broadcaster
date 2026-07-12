@@ -128,6 +128,13 @@ export function Dashboard({
                       Connected
                     </span>
                   </>
+                ) : status.slateActive && status.pushing ? (
+                  <>
+                    <Wifi className="h-4 w-4 text-amber-600 dark:text-amber-500" />
+                    <span className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                      Fallback active
+                    </span>
+                  </>
                 ) : (
                   <>
                     <WifiOff className="h-4 w-4 text-muted-foreground" />
@@ -148,20 +155,24 @@ export function Dashboard({
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium">
-                {status.pushing
-                  ? "Streaming to destinations"
-                  : status.streamActive
-                    ? "Source connected — ready to go live"
-                    : "Waiting for source stream"}
+                {status.pushing && status.slateActive && !status.streamActive
+                  ? "Keepalive fallback active — reconnect OBS"
+                  : status.pushing
+                    ? "Streaming to destinations"
+                    : status.streamActive
+                      ? "Source connected — ready to go live"
+                      : "Waiting for source stream"}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {status.pushing
-                  ? `Pushing to ${enabledDestinations.length} destination${enabledDestinations.length !== 1 ? "s" : ""}`
-                  : !status.streamActive
-                    ? "Connect OBS or your encoder first"
-                    : enabledDestinations.length === 0
-                      ? "Enable at least one destination"
-                      : `${enabledDestinations.length} destination${enabledDestinations.length !== 1 ? "s" : ""} ready`}
+                {status.pushing && status.slateActive && !status.streamActive
+                  ? `Pushing fallback to ${enabledDestinations.length} destination${enabledDestinations.length !== 1 ? "s" : ""} — OBS offline`
+                  : status.pushing
+                    ? `Pushing to ${enabledDestinations.length} destination${enabledDestinations.length !== 1 ? "s" : ""}`
+                    : !status.streamActive
+                      ? "Connect OBS or your encoder first"
+                      : enabledDestinations.length === 0
+                        ? "Enable at least one destination"
+                        : `${enabledDestinations.length} destination${enabledDestinations.length !== 1 ? "s" : ""} ready`}
               </p>
             </div>
             {status.pushing ? (

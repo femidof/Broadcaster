@@ -672,8 +672,12 @@ export interface RelayStats {
 
 export interface DirectRelayCallbacks {
   onStarted: () => void;
+  /** Publisher closed — session is fully over. */
   onStopped: (reason: string) => void;
+  /** Publisher error — session is fully over. */
   onError: (error: string) => void;
+  /** Pull-side failed while publisher is still open (e.g. source dropped). */
+  onPullFailed?: (reason: string) => void;
   onDebugLog: (message: string) => void;
 }
 
@@ -682,12 +686,30 @@ export class DirectRelay {
   private pushClient: RtmpClient | null = null;
   private running = false;
   private inputUrl: string;
-  private outputUrl: string;
-  private name: string;
-  private callbacks: DirectRelayCallbacks;
+  private readonly outputUrl: string;
+  private readonly name: string;
+  private readonly callbacks: DirectRelayCallbacks;
   private bytesSent = 0;
   private lastStatBytes = 0;
   private lastStatTime = Date.now();
+
+  // Session-ID pattern: bumped each time we start a new pull session so that
+  // stale event handlers from a previous pull are silently ignored.
+  private pullSessionId = 0;
+
+  // Timestamp offset for seamless source transitions: all outgoing timestamps
+  // are raw_ts + tsOffset, which is recalculated on each switchInput.
+  private tsOffset = 0;
+  private lastPushedTs = 0;
+  // Set before starting a new pull; resolved to tsOffset on first packet.
+  private pendingTsBase: number | null = null;
+
+  // Cached RTMP packets for the hold-last-frame mode
+  private cachedVideoSeqHeader: Buffer | null = null;
+  private cachedVideoKeyframe: Buffer | null = null;
+  private cachedAudioSeqHeader: Buffer | null = null;
+  private cachedLastAudio: Buffer | null = null;
+  private holdInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     inputUrl: string,
@@ -708,13 +730,12 @@ export class DirectRelay {
     this.callbacks.onDebugLog(`Starting direct relay: ${this.inputUrl} -> ${this.outputUrl}`);
 
     this.pushClient = new RtmpClient(this.outputUrl, true);
-    this.pullClient = new RtmpClient(this.inputUrl, false);
 
     this.pushClient.on("status", (info: Record<string, string>) => {
       this.callbacks.onDebugLog(`Push status: ${JSON.stringify(info)}`);
       if (info?.code === "NetStream.Publish.Start") {
         this.callbacks.onDebugLog("Push client connected, starting pull client");
-        this.pullClient!.start();
+        this.startPull(this.inputUrl);
       }
     });
 
@@ -722,7 +743,9 @@ export class DirectRelay {
       this.callbacks.onDebugLog(`Push error: ${err.message}`);
       if (this.running) {
         this.running = false;
-        this.cleanup();
+        this.stopHoldLastFrame();
+        this.stopCurrentPull();
+        this.pushClient = null;
         this.callbacks.onError(`Push connection failed: ${err.message}`);
       }
     });
@@ -731,64 +754,78 @@ export class DirectRelay {
       this.callbacks.onDebugLog("Push connection closed");
       if (this.running) {
         this.running = false;
-        this.cleanup();
+        this.stopHoldLastFrame();
+        this.stopCurrentPull();
+        this.pushClient = null;
         this.callbacks.onStopped("push_connection_closed");
-      }
-    });
-
-    this.pullClient.on("status", (info: Record<string, string>) => {
-      this.callbacks.onDebugLog(`Pull status: ${JSON.stringify(info)}`);
-      if (info?.code === "NetStream.Play.Start") {
-        this.callbacks.onStarted();
-      }
-    });
-
-    this.pullClient.on("audio", (data: Buffer, timestamp: number) => {
-      if (this.pushClient) {
-        this.pushClient.pushAudio(data, timestamp);
-        this.bytesSent += data.length;
-      }
-    });
-
-    this.pullClient.on("video", (data: Buffer, timestamp: number) => {
-      if (this.pushClient) {
-        this.pushClient.pushVideo(data, timestamp);
-        this.bytesSent += data.length;
-      }
-    });
-
-    this.pullClient.on("script", (data: Buffer, timestamp: number) => {
-      if (this.pushClient) {
-        this.pushClient.pushScript(data, timestamp);
-        this.bytesSent += data.length;
-      }
-    });
-
-    this.pullClient.on("error", (err: Error) => {
-      this.callbacks.onDebugLog(`Pull error: ${err.message}`);
-      if (this.running) {
-        this.running = false;
-        this.cleanup();
-        this.callbacks.onError(`Pull connection failed: ${err.message}`);
-      }
-    });
-
-    this.pullClient.on("close", () => {
-      this.callbacks.onDebugLog("Pull connection closed");
-      if (this.running) {
-        this.running = false;
-        this.cleanup();
-        this.callbacks.onStopped("pull_connection_closed");
       }
     });
 
     this.pushClient.start();
   }
 
+  /**
+   * Swap the pull source without touching the publisher.
+   * Call this when the ingest source changes (OBS→slate or slate→OBS).
+   * Timestamps are offset so the outgoing stream remains monotonic.
+   */
+  switchInput(newInputUrl: string): void {
+    if (!this.running) return;
+    this.callbacks.onDebugLog(`Switching pull source to: ${newInputUrl}`);
+    this.inputUrl = newInputUrl;
+    // Schedule ts continuation: next first packet from new source will set tsOffset
+    this.pendingTsBase = this.lastPushedTs + 33; // ≈1 video frame gap
+    this.startPull(newInputUrl);
+  }
+
+  /**
+   * Freeze the stream by replaying the last cached keyframe + audio on a fixed
+   * interval. This keeps the publisher alive with continuous media while the
+   * real source (e.g. OBS) is momentarily unavailable and the slate warms up.
+   * Call switchInput() to resume a live source.
+   */
+  holdLastFrame(fps = 30): void {
+    if (!this.running || this.holdInterval !== null) return;
+    if (!this.cachedVideoKeyframe && !this.cachedAudioSeqHeader) {
+      this.callbacks.onDebugLog("holdLastFrame: no cached frames available yet");
+      return;
+    }
+    this.callbacks.onDebugLog("Holding last frame while waiting for slate");
+    // Discard the existing pull without triggering onPullFailed
+    ++this.pullSessionId;
+    this.stopCurrentPull();
+
+    const interval = Math.round(1000 / fps);
+    let nextTs = this.lastPushedTs + interval;
+
+    this.holdInterval = setInterval(() => {
+      if (!this.pushClient?.connected) return;
+      // Codec header + keyframe keep decoders happy
+      if (this.cachedVideoSeqHeader) {
+        this.pushClient.pushVideo(this.cachedVideoSeqHeader, nextTs);
+      }
+      if (this.cachedVideoKeyframe) {
+        this.pushClient.pushVideo(this.cachedVideoKeyframe, nextTs);
+      }
+      if (this.cachedAudioSeqHeader) {
+        this.pushClient.pushAudio(this.cachedAudioSeqHeader, nextTs);
+      }
+      if (this.cachedLastAudio) {
+        this.pushClient.pushAudio(this.cachedLastAudio, nextTs);
+      }
+      this.lastPushedTs = nextTs;
+      nextTs += interval;
+    }, interval);
+  }
+
   stop(): void {
     if (!this.running) return;
     this.running = false;
-    this.cleanup();
+    ++this.pullSessionId; // invalidate any pending pull callbacks
+    this.stopHoldLastFrame();
+    this.stopCurrentPull();
+    try { this.pushClient?.stop(); } catch { /* ignore */ }
+    this.pushClient = null;
   }
 
   getStats(): RelayStats {
@@ -801,10 +838,91 @@ export class DirectRelay {
     return { bitrateKbps };
   }
 
-  private cleanup(): void {
-    try { this.pullClient?.stop(); } catch { /* ignore */ }
-    try { this.pushClient?.stop(); } catch { /* ignore */ }
+  private adjustTs(rawTs: number): number {
+    if (this.pendingTsBase !== null) {
+      this.tsOffset = this.pendingTsBase - rawTs;
+      this.pendingTsBase = null;
+    }
+    const ts = Math.max(0, rawTs + this.tsOffset);
+    if (ts > this.lastPushedTs) this.lastPushedTs = ts;
+    return ts;
+  }
+
+  private startPull(inputUrl: string): void {
+    this.stopHoldLastFrame();
+    this.stopCurrentPull();
+
+    const sessionId = ++this.pullSessionId;
+    const pull = new RtmpClient(inputUrl, false);
+    this.pullClient = pull;
+
+    pull.on("status", (info: Record<string, string>) => {
+      if (sessionId !== this.pullSessionId) return;
+      this.callbacks.onDebugLog(`Pull status: ${JSON.stringify(info)}`);
+      if (info?.code === "NetStream.Play.Start") {
+        this.callbacks.onStarted();
+      }
+    });
+
+    pull.on("audio", (data: Buffer, rawTs: number) => {
+      if (sessionId !== this.pullSessionId || !this.pushClient) return;
+      // Cache audio sequence header and last raw audio frame for hold-last-frame mode
+      if (data.length > 1 && (data[0] & 0xf0) === 0xa0) {
+        if (data[1] === 0x00) this.cachedAudioSeqHeader = Buffer.from(data);
+        else this.cachedLastAudio = Buffer.from(data);
+      }
+      const ts = this.adjustTs(rawTs);
+      this.pushClient.pushAudio(data, ts);
+      this.bytesSent += data.length;
+    });
+
+    pull.on("video", (data: Buffer, rawTs: number) => {
+      if (sessionId !== this.pullSessionId || !this.pushClient) return;
+      // Cache H.264 sequence header and last IDR keyframe for hold-last-frame mode
+      if (data.length > 1) {
+        const isKey = (data[0] & 0xf0) === 0x10; // frame type 1 = keyframe
+        if (isKey && data[1] === 0x00) this.cachedVideoSeqHeader = Buffer.from(data);
+        else if (isKey) this.cachedVideoKeyframe = Buffer.from(data);
+      }
+      const ts = this.adjustTs(rawTs);
+      this.pushClient.pushVideo(data, ts);
+      this.bytesSent += data.length;
+    });
+
+    pull.on("script", (data: Buffer, rawTs: number) => {
+      if (sessionId !== this.pullSessionId || !this.pushClient) return;
+      const ts = this.adjustTs(rawTs);
+      this.pushClient.pushScript(data, ts);
+      this.bytesSent += data.length;
+    });
+
+    pull.on("error", (err: Error) => {
+      if (sessionId !== this.pullSessionId) return;
+      this.callbacks.onDebugLog(`Pull error: ${err.message}`);
+      this.pullClient = null;
+      this.callbacks.onPullFailed?.(`Pull connection failed: ${err.message}`);
+    });
+
+    pull.on("close", () => {
+      if (sessionId !== this.pullSessionId) return;
+      this.callbacks.onDebugLog("Pull connection closed");
+      this.pullClient = null;
+      this.callbacks.onPullFailed?.("pull_connection_closed");
+    });
+
+    pull.start();
+  }
+
+  private stopCurrentPull(): void {
+    const p = this.pullClient;
     this.pullClient = null;
-    this.pushClient = null;
+    try { p?.stop(); } catch { /* ignore */ }
+  }
+
+  private stopHoldLastFrame(): void {
+    if (this.holdInterval) {
+      clearInterval(this.holdInterval);
+      this.holdInterval = null;
+    }
   }
 }

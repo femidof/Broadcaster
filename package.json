@@ -1,7 +1,7 @@
 {
   "name": "broadcaster",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.2.1",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.0",
+    "@tauri-apps/plugin-dialog": "^2.7.0",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@tauri-apps/plugin-updater": "^2.10.0",
     "class-variance-authority": "^0.7.1",

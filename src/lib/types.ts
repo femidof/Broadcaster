@@ -15,6 +15,10 @@ export interface Destination {
   url: string;
   streamKey: string;
   enabled: boolean;
+  /** Route this destination through the bundled ffmpeg instead of the native RTMP client. */
+  useFfmpeg?: boolean;
+  /** Optional override for ffmpeg output args (defaults to `-c copy`). Only used when useFfmpeg is true. */
+  ffmpegArgs?: string;
 }
 
 export interface RelayStatus {
@@ -26,12 +30,44 @@ export interface RelayStatus {
   bitrateKbps: number;
 }
 
+/** Reserved RTMP stream key for internal slate injector — encoders must not use this key. */
+export const SLATE_RTMP_STREAM_KEY = "_bc_slate";
+
+/** OBS disconnect fallback (matches sidecar profile field name `streamFallbackSlate`). */
+export interface StreamFallbackSlate {
+  enabled: boolean;
+  mediaPath: string;
+  /**
+   * slate_only: switch immediately to slate (debounce window).
+   * last_frame_then_slate: loop last cached keyframe for this duration then switch to slate.
+   */
+  sourceMode: "slate_only" | "last_frame_then_slate";
+  /**
+   * Ms to debounce before switching to slate (slate_only) or hold last frame
+   * before switching to slate (last_frame_then_slate).
+   */
+  gracePeriodMs: number;
+  /** indefinite: keep slate until OBS returns. stop_after: stop pushing after stopAfterMs. */
+  durationMode: "indefinite" | "stop_after";
+  /** Only used when durationMode = "stop_after". Default 300 000 ms (5 min). */
+  stopAfterMs: number;
+}
+
+export const SLATE_GRACE_PERIOD_MS_DEFAULT = 2000;
+export const SLATE_GRACE_PERIOD_MS_MIN = 0;
+export const SLATE_GRACE_PERIOD_MS_MAX = 60000;
+
+export const SLATE_STOP_AFTER_MS_DEFAULT = 300_000;
+export const SLATE_STOP_AFTER_MS_MIN = 30_000;
+export const SLATE_STOP_AFTER_MS_MAX = 3_600_000;
+
 export interface Profile {
   id: string;
   name: string;
   port: number;
   autoStart: boolean;
   destinations: Destination[];
+  streamFallbackSlate?: StreamFallbackSlate;
 }
 
 export interface ProfileStatus {
@@ -42,6 +78,8 @@ export interface ProfileStatus {
   serverRunning: boolean;
   streamActive: boolean;
   pushing: boolean;
+  slateActive: boolean;
+  streamFallbackSlate?: StreamFallbackSlate;
   relays: RelayStatus[];
   destinations: Destination[];
 }
@@ -139,6 +177,7 @@ export type DashboardStatus = Pick<
   | "port"
   | "streamActive"
   | "pushing"
+  | "slateActive"
   | "relays"
   | "destinations"
 >;

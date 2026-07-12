@@ -1,13 +1,14 @@
 {
   "name": "broadcaster-sidecar",
-  "version": "2.0.0",
+  "version": "2.2.1",
   "private": true,
   "description": "RTMP relay sidecar for Broadcaster",
   "main": "dist/index.js",
   "scripts": {
     "build": "node build.mjs",
     "build:ts": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "npm run build:ts && node --test test/*.test.cjs"
   },
   "dependencies": {
     "node-media-server": "^2.7.1"
