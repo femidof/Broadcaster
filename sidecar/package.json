@@ -7,7 +7,8 @@
   "scripts": {
     "build": "node build.mjs",
     "build:ts": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "npm run build:ts && node --test test/*.test.cjs"
   },
   "dependencies": {
     "node-media-server": "^2.7.1"
