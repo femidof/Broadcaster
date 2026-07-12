@@ -6,9 +6,13 @@
  * are missing so that `tauri build` always produces a working app.
  */
 
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import { existsSync, statSync } from "fs";
 import { resolve, join } from "path";
+
+function expectedFfmpegVersion(targetTriple) {
+  return targetTriple.includes("apple-darwin") ? "6.1.1" : "8.0";
+}
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -30,6 +34,16 @@ function isBinaryReady(filePath) {
   return statSync(filePath).size > 0;
 }
 
+function isFfmpegReady(filePath, expectedVersion) {
+  if (!isBinaryReady(filePath)) return false;
+  try {
+    const output = execFileSync(filePath, ["-version"], { encoding: "utf-8" });
+    return output.startsWith(`ffmpeg version ${expectedVersion}`);
+  } catch {
+    return false;
+  }
+}
+
 function main() {
   const { target: requestedTarget } = parseArgs();
   const targetTriple = requestedTarget || getHostTriple();
@@ -40,12 +54,13 @@ function main() {
   const ext = targetTriple.includes("windows") ? ".exe" : "";
   const sidecarPath = join(binariesDir, `broadcaster-sidecar-${targetTriple}${ext}`);
   const ffmpegPath = join(binariesDir, `ffmpeg-${targetTriple}${ext}`);
+  const ffmpegVersion = expectedFfmpegVersion(targetTriple);
 
   let needed = [];
 
-  if (!isBinaryReady(ffmpegPath)) {
+  if (!isFfmpegReady(ffmpegPath, ffmpegVersion)) {
     needed.push("ffmpeg");
-    console.log(`[ensure-binaries] ffmpeg binary missing or empty, downloading...`);
+    console.log(`[ensure-binaries] FFmpeg ${ffmpegVersion} missing or outdated, downloading...`);
     execSync(`npm run ffmpeg:download${targetArgs}`, { cwd: rootDir, stdio: "inherit" });
   }
 

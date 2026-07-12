@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2026-07-12
+
+### Changed
+
+- Updated frontend, build, packaging, and Rust dependencies to their newest compatible releases.
+- Updated bundled static FFmpeg from 6.0 to 6.1.1 on macOS and 8.0 on Linux/Windows, with pinned downloader sources for reproducible builds without raising the macOS minimum to 15.
+- Aligned Node.js type definitions with the Node 22 runtime used by the sidecar packager and release workflow.
+
+### Security
+
+- Updated vulnerable Vite, esbuild, Express, `qs`, `ws`, and archive-tooling dependency paths.
+
+### Fixed
+
+- FFmpeg downloader cleanup now works on Windows without relying on a Unix `rm` command.
+
 ## [2.2.0] - 2026-04-29
 
 ### Added

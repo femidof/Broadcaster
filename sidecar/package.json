@@ -1,6 +1,6 @@
 {
   "name": "broadcaster-sidecar",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "private": true,
   "description": "RTMP relay sidecar for Broadcaster",
   "main": "dist/index.js",
@@ -11,11 +11,20 @@
     "test": "npm run build:ts && node --test test/*.test.cjs"
   },
   "dependencies": {
-    "node-media-server": "^2.7.1"
+    "node-media-server": "^2.7.4"
   },
   "devDependencies": {
-    "@yao-pkg/pkg": "^6.14.0",
-    "@types/node": "^22.0.0",
-    "typescript": "~5.6.0"
+    "@yao-pkg/pkg": "^6.21.0",
+    "@types/node": "^22.20.1",
+    "typescript": "~6.0.3"
+  },
+  "overrides": {
+    "express": "4.22.2",
+    "qs": "6.15.3",
+    "tar": "7.5.20",
+    "ws": "8.21.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
   }
 }

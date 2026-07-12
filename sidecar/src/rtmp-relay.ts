@@ -220,7 +220,7 @@ class RtmpClient extends EventEmitter {
   private onSocketData(data: Buffer): void {
     let bytes = data.length;
     let p = 0;
-    let n = 0;
+    let n: number;
     while (bytes > 0) {
       switch (this.handshakeState) {
         case RTMP_HANDSHAKE_UNINIT:
@@ -470,7 +470,7 @@ class RtmpClient extends EventEmitter {
   }
 
   private rtmpChunkRead(data: Buffer, p: number, bytes: number): void {
-    let size = 0;
+    let size: number;
     let offset = 0;
     let extended_timestamp = 0;
 

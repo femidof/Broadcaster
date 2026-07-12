@@ -443,7 +443,7 @@ pub async fn spawn_sidecar(app: &AppHandle) -> Result<(), String> {
                     let mut child_lock = child_ref.lock().await;
                     *child_lock = None;
 
-                    let is_error = payload.code.map_or(true, |c| c != 0);
+                    let is_error = payload.code != Some(0);
                     if is_error {
                         let error_msg = format!(
                             "Sidecar terminated unexpectedly (code: {:?}, signal: {:?})",
