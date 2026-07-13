@@ -132,7 +132,7 @@ export const PLATFORM_PRESETS: Record<
     label: "Twitch",
   },
   youtube: {
-    url: "rtmp://a.rtmp.youtube.com/live2/",
+    url: "rtmps://a.rtmps.youtube.com:443/live2/",
     label: "YouTube",
   },
   facebook: {

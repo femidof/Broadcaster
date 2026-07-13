@@ -84,16 +84,6 @@ function StreamFallbackCard({
 
   const commitIdRef = useRef(0);
 
-  // Keep draft in sync with external changes (e.g. sidecar status refresh)
-  useEffect(() => {
-    setDraft(effective);
-    setGraceDraft(String(effective.gracePeriodMs ?? SLATE_GRACE_PERIOD_MS_DEFAULT));
-    setStopMinutesDraft(String(msToMinutes(effective.stopAfterMs ?? SLATE_STOP_AFTER_MS_DEFAULT)));
-    // Don't reset savedAt/saveError here — those are UX signals about user actions
-    // and will be overwritten by the next commit result.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slate?.enabled, slate?.mediaPath, slate?.sourceMode, slate?.gracePeriodMs, slate?.durationMode, slate?.stopAfterMs]);
-
   async function commit(next: StreamFallbackSlate) {
     setDraft(next);
     setSaving(true);
@@ -491,7 +481,7 @@ export function SettingsPanel({
   onDebugModeChange,
   onCheckUpdates,
 }: SettingsPanelProps) {
-  const [appVersion, setAppVersion] = useState<string>("2.2.1");
+  const [appVersion, setAppVersion] = useState<string>("2.2.2");
 
   useEffect(() => {
     getVersion()
@@ -522,6 +512,7 @@ export function SettingsPanel({
       />
 
       <StreamFallbackCard
+        key={selectedProfile.profileId}
         slate={selectedProfile.streamFallbackSlate}
         onChange={onStreamFallbackSlateChange}
       />

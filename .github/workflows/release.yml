@@ -5,6 +5,12 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      windowsRelaySmokeOnly:
+        description: 'Build binaries and run relay smoke tests without packaging a release'
+        required: false
+        default: false
+        type: boolean
 
 # Opt into Node 24 for JS actions (tauri-action may still ship on Node 20 until upstream updates).
 env:
@@ -73,7 +79,16 @@ jobs:
       - name: Download FFmpeg
         run: node scripts/download-ffmpeg.mjs --target ${{ matrix.target }}
 
+      - name: Smoke test packaged Windows relays
+        if: startsWith(matrix.target, 'x86_64-pc-windows')
+        shell: pwsh
+        run: >-
+          node sidecar/test/relay-smoke.cjs
+          --sidecar src-tauri/binaries/broadcaster-sidecar-${{ matrix.target }}.exe
+          --ffmpeg src-tauri/binaries/ffmpeg-${{ matrix.target }}.exe
+
       - name: Build Tauri app
+        if: github.event_name != 'workflow_dispatch' || !inputs.windowsRelaySmokeOnly
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

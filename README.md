@@ -7,7 +7,7 @@
   </table>
 </div>
 
-**Current version:** **2.2.1**
+**Current version:** **2.2.2**
 
 A lightweight desktop multistream relay app. Stream to Twitch, YouTube, Facebook Live, Instagram Live, TikTok Live, Trovo, Kick, Restream, BIGO LIVE, and custom RTMP destinations simultaneously. **Version 2** adds **profiles**: multiple named setups, each with its own local RTMP port and destination list, so you can run several ingest servers at once (for example backup or split distribution).
 
@@ -28,7 +28,7 @@ OBS → localhost:<port> (per profile) → Broadcaster → Twitch / YouTube / �
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) v20+
+- [Node.js](https://nodejs.org/) v22.13+
 - [Rust](https://rustup.rs/) (latest stable)
 - Platform build tools:
   - **macOS**: Xcode Command Line Tools (`xcode-select --install`)

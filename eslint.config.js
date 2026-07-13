@@ -8,6 +8,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores([
     'dist',
+    '.ffmpeg-tmp',
     'sidecar/dist',
     'src-tauri/target',
     '**/node_modules/**',
