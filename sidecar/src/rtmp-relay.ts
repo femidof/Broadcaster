@@ -2,7 +2,6 @@ import { EventEmitter } from "events";
 import * as net from "net";
 import * as tls from "tls";
 import * as crypto from "crypto";
-import * as url from "url";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AMF = require("node-media-server/src/node_core_amf");
@@ -91,18 +90,21 @@ interface UrlInfo {
   isSecure: boolean;
 }
 
-function parseRtmpUrl(rtmpUrl: string): UrlInfo {
-  const normalized = rtmpUrl.replace(/^rtmps:\/\//, "rtmp://");
-  const parsed = url.parse(normalized, true);
-  const pathname = parsed.pathname ?? "/";
+export function parseRtmpUrl(rtmpUrl: string): UrlInfo {
+  const parsed = new URL(rtmpUrl);
+  if (parsed.protocol !== "rtmp:" && parsed.protocol !== "rtmps:") {
+    throw new Error(`Unsupported RTMP protocol: ${parsed.protocol}`);
+  }
+  const pathname = parsed.pathname || "/";
   const parts = pathname.split("/").filter(Boolean);
   const app = parts[0] ?? "";
   const stream = parts.slice(1).join("/");
-  const isSecure = rtmpUrl.startsWith("rtmps://");
+  const isSecure = parsed.protocol === "rtmps:";
   const defaultPort = isSecure ? RTMPS_PORT : RTMP_PORT;
   const port = parsed.port ? parseInt(parsed.port, 10) : defaultPort;
-  const hostname = parsed.hostname ?? "localhost";
-  const tcurl = `rtmp://${hostname}:${port}/${app}`;
+  const hostname = parsed.hostname || "localhost";
+  const scheme = isSecure ? "rtmps" : "rtmp";
+  const tcurl = `${scheme}://${hostname}:${port}/${app}`;
 
   return { hostname, port, app, stream, tcurl, isSecure };
 }
@@ -148,7 +150,12 @@ class RtmpClient extends EventEmitter {
 
     if (this.info.isSecure) {
       this.socket = tls.connect(
-        { host: this.info.hostname, port: this.info.port, rejectUnauthorized: true },
+        {
+          host: this.info.hostname,
+          port: this.info.port,
+          servername: this.info.hostname,
+          rejectUnauthorized: true,
+        },
         onConnect
       );
     } else {
