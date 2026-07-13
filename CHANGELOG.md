@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated frontend, build, packaging, and Rust dependencies to their newest compatible releases.
 - Updated bundled static FFmpeg from 6.0 to 6.1.1 on macOS and 8.0 on Linux/Windows, with pinned downloader sources for reproducible builds without raising the macOS minimum to 15.
 - Aligned Node.js type definitions with the Node 22 runtime used by the sidecar packager and release workflow.
-- New YouTube destinations use RTMPS over port 443 by default for better compatibility with restricted Windows networks.
+- YouTube destinations use RTMPS over port 443 by default for better compatibility with restricted Windows networks; existing destinations using Broadcaster's old preset are migrated automatically.
 - Windows release builds now relay real H.264/AAC media through both the native and FFmpeg backends before packaging.
 
 ### Security

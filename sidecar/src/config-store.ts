@@ -15,6 +15,8 @@ import {
 } from "./types";
 
 export const DEFAULT_PROFILE_ID = "default";
+const YOUTUBE_RTMPS_URL = "rtmps://a.rtmps.youtube.com:443/live2/";
+const LEGACY_YOUTUBE_URL = /^rtmp:\/\/a\.rtmp\.youtube\.com(?::1935)?\/live2\/?$/i;
 
 function defaultProfile(): Profile {
   return {
@@ -91,11 +93,15 @@ function parseStreamFallbackSlate(raw: unknown): StreamFallbackSlate | undefined
 }
 
 function normalizeDestination(d: Destination): Destination {
+  const url =
+    d.platform === "youtube" && LEGACY_YOUTUBE_URL.test(d.url.trim())
+      ? YOUTUBE_RTMPS_URL
+      : d.url;
   const out: Destination = {
     id: d.id,
     name: d.name,
     platform: d.platform,
-    url: d.url,
+    url,
     streamKey: d.streamKey,
     enabled: d.enabled,
   };
@@ -115,7 +121,7 @@ function parseProfile(value: unknown): Profile | null {
     typeof o.port === "number" && o.port >= 1024 && o.port <= 65535 ? o.port : 1935;
   const autoStart = typeof o.autoStart === "boolean" ? o.autoStart : false;
   const destinations: Destination[] = Array.isArray(o.destinations)
-    ? o.destinations.filter(isDestination)
+    ? o.destinations.filter(isDestination).map(normalizeDestination)
     : [];
   const streamFallbackSlate = parseStreamFallbackSlate(o.streamFallbackSlate);
   const profile: Profile = { id, name, port, autoStart, destinations };
@@ -131,7 +137,7 @@ function migrateFromV1Flat(o: Record<string, unknown>): AppConfig {
     typeof o.port === "number" && o.port >= 1024 && o.port <= 65535 ? o.port : 1935;
   const autoStart = typeof o.autoStart === "boolean" ? o.autoStart : true;
   const destinations: Destination[] = Array.isArray(o.destinations)
-    ? o.destinations.filter(isDestination)
+    ? o.destinations.filter(isDestination).map(normalizeDestination)
     : [];
   return {
     debugMode,
